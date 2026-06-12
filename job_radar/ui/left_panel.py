@@ -1,0 +1,317 @@
+"""Columna izquierda: parámetros de búsqueda y control de monitoreo."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QThreadPool, Qt, Signal
+from PySide6.QtWidgets import (
+    QCheckBox, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
+    QScrollArea, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+)
+
+from ..config import DEFAULT_KEYWORDS, MODALIDADES, UBICACIONES
+from ..db.database import Database
+from ..profile.cv_parser import analyze_cv, extract_cv_text
+from ..service import AppService
+from .widgets import Chip, FlowLayout
+from .workers import Worker
+
+
+class LeftPanel(QWidget):
+    """Panel de configuración de búsqueda. Persiste todo en SQLite."""
+
+    #: Emitida al pulsar el botón grande: True=comenzar, False=detener.
+    monitoring_toggled = Signal(bool)
+    #: Emitida cuando cambian filtros que afectan la bandeja (repetidas).
+    filtros_cambiados = Signal()
+
+    def __init__(self, db: Database, service: AppService, pool: QThreadPool,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.db = db
+        self.service = service
+        self.pool = pool
+        self._monitoring = False
+        self._build()
+        self._load()
+
+    # -- Construcción ---------------------------------------------------------
+
+    def _build(self) -> None:
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        contenido = QWidget()
+        scroll.setWidget(contenido)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+        col = QVBoxLayout(contenido)
+
+        col.addWidget(self._build_keywords())
+        col.addWidget(self._build_modalidad())
+        col.addWidget(self._build_ubicacion())
+        col.addWidget(self._build_tecnologias())
+        col.addWidget(self._build_cv())
+        col.addWidget(self._build_opciones())
+        col.addWidget(self._build_control())
+        col.addStretch(1)
+
+    def _build_keywords(self) -> QGroupBox:
+        grp = QGroupBox("Palabras clave")
+        v = QVBoxLayout(grp)
+        fila = QHBoxLayout()
+        self.kw_input = QLineEdit()
+        self.kw_input.setPlaceholderText("Escribe una palabra clave…")
+        self.kw_input.returnPressed.connect(self._add_keyword)
+        btn = QPushButton("Agregar")
+        btn.clicked.connect(self._add_keyword)
+        fila.addWidget(self.kw_input)
+        fila.addWidget(btn)
+        v.addLayout(fila)
+        self.kw_container = QWidget()
+        self.kw_flow = FlowLayout(self.kw_container)
+        v.addWidget(self.kw_container)
+        return grp
+
+    def _build_modalidad(self) -> QGroupBox:
+        grp = QGroupBox("Modalidad")
+        h = QHBoxLayout(grp)
+        self.modalidad_checks: dict[str, QCheckBox] = {}
+        for m in MODALIDADES:
+            cb = QCheckBox(m)
+            cb.stateChanged.connect(self._save_modalidad)
+            self.modalidad_checks[m] = cb
+            h.addWidget(cb)
+        return grp
+
+    def _build_ubicacion(self) -> QGroupBox:
+        grp = QGroupBox("Ubicación")
+        v = QVBoxLayout(grp)
+        self.ubicacion = QComboBox()
+        self.ubicacion.addItems(UBICACIONES)
+        self.ubicacion.currentTextChanged.connect(
+            lambda t: self.db.set_setting("ubicacion", t)
+        )
+        v.addWidget(self.ubicacion)
+        return grp
+
+    def _build_tecnologias(self) -> QGroupBox:
+        grp = QGroupBox("Mis tecnologías")
+        v = QVBoxLayout(grp)
+        fila = QHBoxLayout()
+        self.tech_input = QLineEdit()
+        self.tech_input.setPlaceholderText("Tecnología…")
+        self.tech_level = QSpinBox()
+        self.tech_level.setRange(1, 10)
+        self.tech_level.setValue(5)
+        self.tech_level.setPrefix("Nivel ")
+        btn = QPushButton("Agregar")
+        btn.clicked.connect(self._add_tech)
+        self.tech_input.returnPressed.connect(self._add_tech)
+        fila.addWidget(self.tech_input)
+        fila.addWidget(self.tech_level)
+        fila.addWidget(btn)
+        v.addLayout(fila)
+        self.tech_list = QListWidget()
+        self.tech_list.setMaximumHeight(160)
+        v.addWidget(self.tech_list)
+        ayuda = QLabel("Doble clic en una fila para eliminarla.")
+        ayuda.setStyleSheet("color:gray;font-size:11px;")
+        v.addWidget(ayuda)
+        self.tech_list.itemDoubleClicked.connect(self._remove_tech)
+        return grp
+
+    def _build_cv(self) -> QGroupBox:
+        grp = QGroupBox("Mi CV y perfil")
+        v = QVBoxLayout(grp)
+        self.btn_cv = QPushButton("Cargar CV (PDF o DOCX)")
+        self.btn_cv.clicked.connect(self._cargar_cv)
+        v.addWidget(self.btn_cv)
+        v.addWidget(QLabel("Resumen del perfil (editable, se usa en cada evaluación):"))
+        self.perfil_summary = QTextEdit()
+        self.perfil_summary.setPlaceholderText(
+            "Se autocompleta al cargar el CV; puedes editarlo."
+        )
+        self.perfil_summary.setMaximumHeight(120)
+        self.perfil_summary.textChanged.connect(self._save_summary)
+        v.addWidget(self.perfil_summary)
+        return grp
+
+    def _build_opciones(self) -> QGroupBox:
+        grp = QGroupBox("Opciones")
+        v = QVBoxLayout(grp)
+        self.chk_repetidas = QCheckBox("Mostrar vacantes repetidas")
+        self.chk_repetidas.stateChanged.connect(self._on_repetidas)
+        v.addWidget(self.chk_repetidas)
+        return grp
+
+    def _build_control(self) -> QWidget:
+        cont = QWidget()
+        v = QVBoxLayout(cont)
+        self.btn_monitor = QPushButton("▶  Comenzar monitoreo")
+        self.btn_monitor.setMinimumHeight(44)
+        self.btn_monitor.setStyleSheet(
+            "QPushButton{background:#27ae60;color:white;font-weight:bold;font-size:14px;"
+            "border-radius:6px;} QPushButton:hover{background:#2ecc71;}"
+        )
+        self.btn_monitor.clicked.connect(self._toggle_monitor)
+        v.addWidget(self.btn_monitor)
+        self.lbl_estado = QLabel("Monitoreo detenido.")
+        self.lbl_estado.setWordWrap(True)
+        self.lbl_estado.setStyleSheet("color:gray;font-size:11px;")
+        v.addWidget(self.lbl_estado)
+        return cont
+
+    # -- Carga inicial --------------------------------------------------------
+
+    def _load(self) -> None:
+        self.db.seed_keywords_if_empty(DEFAULT_KEYWORDS)
+        self._refresh_keywords()
+        self._refresh_techs()
+        self.perfil_summary.blockSignals(True)
+        self.perfil_summary.setPlainText(self.db.get_profile_summary())
+        self.perfil_summary.blockSignals(False)
+        s = self.db.get_all_settings()
+        sel = set((s.get("modalidades", "") or "").split(","))
+        for m, cb in self.modalidad_checks.items():
+            cb.blockSignals(True)
+            cb.setChecked(m in sel)
+            cb.blockSignals(False)
+        ub = s.get("ubicacion", "")
+        if ub:
+            i = self.ubicacion.findText(ub)
+            if i >= 0:
+                self.ubicacion.setCurrentIndex(i)
+
+    # -- Keywords -------------------------------------------------------------
+
+    def _add_keyword(self) -> None:
+        palabra = self.kw_input.text().strip()
+        if palabra:
+            self.db.add_keyword(palabra)
+            self.kw_input.clear()
+            self._refresh_keywords()
+
+    def _refresh_keywords(self) -> None:
+        while self.kw_flow.count():
+            item = self.kw_flow.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+        for palabra in self.db.get_keywords():
+            chip = Chip(palabra)
+            chip.removed.connect(self._remove_keyword)
+            self.kw_flow.addWidget(chip)
+
+    def _remove_keyword(self, palabra: str) -> None:
+        self.db.remove_keyword(palabra)
+        self._refresh_keywords()
+
+    # -- Modalidad / opciones -------------------------------------------------
+
+    def _save_modalidad(self) -> None:
+        sel = [m for m, cb in self.modalidad_checks.items() if cb.isChecked()]
+        self.db.set_setting("modalidades", ",".join(sel))
+
+    def _on_repetidas(self) -> None:
+        self.db.set_setting(
+            "mostrar_repetidas", "1" if self.chk_repetidas.isChecked() else "0"
+        )
+        self.filtros_cambiados.emit()
+
+    def mostrar_repetidas(self) -> bool:
+        return self.chk_repetidas.isChecked()
+
+    # -- Tecnologías ----------------------------------------------------------
+
+    def _add_tech(self) -> None:
+        nombre = self.tech_input.text().strip()
+        if nombre:
+            self.db.upsert_technology(nombre, self.tech_level.value(), "manual")
+            self.tech_input.clear()
+            self._refresh_techs()
+
+    def _refresh_techs(self) -> None:
+        self.tech_list.clear()
+        for t in self.db.get_technologies():
+            etiqueta = f"{t['name']}  —  nivel {t['level']}/10  ({t['origin']})"
+            item = QListWidgetItem(etiqueta)
+            item.setData(Qt.UserRole, t["id"])
+            self.tech_list.addItem(item)
+
+    def _remove_tech(self, item: QListWidgetItem) -> None:
+        tech_id = item.data(Qt.UserRole)
+        if tech_id is not None:
+            self.db.remove_technology(int(tech_id))
+            self._refresh_techs()
+
+    # -- Perfil ---------------------------------------------------------------
+
+    def _save_summary(self) -> None:
+        self.db.set_profile_summary(self.perfil_summary.toPlainText())
+
+    # -- CV -------------------------------------------------------------------
+
+    def _cargar_cv(self) -> None:
+        ruta, _ = QFileDialog.getOpenFileName(
+            self, "Selecciona tu CV", "", "Documentos (*.pdf *.docx)"
+        )
+        if not ruta:
+            return
+        self.btn_cv.setEnabled(False)
+        self.btn_cv.setText("Analizando CV con IA…")
+        client = self.service.build_client()
+
+        def tarea() -> dict:
+            texto = extract_cv_text(ruta)
+            if not texto.strip():
+                raise ValueError("No se pudo extraer texto del CV.")
+            return analyze_cv(client, texto)
+
+        worker = Worker(tarea)
+        worker.signals.result.connect(self._cv_listo)
+        worker.signals.error.connect(self._cv_error)
+        worker.signals.finished.connect(lambda: (
+            self.btn_cv.setEnabled(True),
+            self.btn_cv.setText("Cargar CV (PDF o DOCX)"),
+        ))
+        self.pool.start(worker)
+
+    def _cv_listo(self, data: dict) -> None:
+        # Agrega tecnologías detectadas sin borrar ni duplicar las manuales.
+        for t in data.get("tecnologias", []):
+            self.db.upsert_technology(t["name"], t["level"], "cv")
+        self._refresh_techs()
+        resumen = data.get("resumen", "").strip()
+        if resumen:
+            actual = self.perfil_summary.toPlainText().strip()
+            nuevo = resumen if not actual else f"{actual}\n\n{resumen}"
+            self.perfil_summary.setPlainText(nuevo)
+        QMessageBox.information(
+            self, "CV analizado",
+            f"Se detectaron {len(data.get('tecnologias', []))} tecnologías y se "
+            "actualizó el resumen del perfil."
+        )
+
+    def _cv_error(self, msg: str) -> None:
+        QMessageBox.warning(self, "Error al analizar el CV", msg)
+
+    # -- Control de monitoreo -------------------------------------------------
+
+    def _toggle_monitor(self) -> None:
+        self._monitoring = not self._monitoring
+        if self._monitoring:
+            self.btn_monitor.setText("⏹  Detener monitoreo")
+            self.btn_monitor.setStyleSheet(
+                "QPushButton{background:#c0392b;color:white;font-weight:bold;"
+                "font-size:14px;border-radius:6px;} QPushButton:hover{background:#e74c3c;}"
+            )
+        else:
+            self.btn_monitor.setText("▶  Comenzar monitoreo")
+            self.btn_monitor.setStyleSheet(
+                "QPushButton{background:#27ae60;color:white;font-weight:bold;"
+                "font-size:14px;border-radius:6px;} QPushButton:hover{background:#2ecc71;}"
+            )
+        self.monitoring_toggled.emit(self._monitoring)
+
+    def set_estado(self, texto: str) -> None:
+        self.lbl_estado.setText(texto)
