@@ -1,0 +1,33 @@
+# --- Memoria de desarrollo por módulos (privada, no se versiona) ---
+dev-memory/
+
+# --- Entornos virtuales ---
+.venv/
+venv/
+env/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# --- Base de datos y secretos (NUNCA versionar) ---
+*.db
+*.sqlite
+*.sqlite3
+job_radar.db
+.env
+secrets.json
+
+# --- PyInstaller ---
+build/
+dist/
+*.spec.bak
+
+# --- IDE / SO ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
