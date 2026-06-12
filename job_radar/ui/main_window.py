@@ -138,6 +138,62 @@ class MainWindow(QMainWindow):
         for uid in nuevos:
             self._encolar_clasificacion(uid)
 
+    def run_group_b(self, day_key: str) -> None:
+        """Corrida del Grupo B (JobSpy + SerpAPI). Registra la corrida en ``runs``.
+
+        Respeta la cuota mensual de SerpAPI y salta fuentes desactivadas (OCC).
+        """
+        from ..sources import JobSpySource, SerpApiSource
+
+        proxies = self.service.proxies()
+        query = self.service.build_group_b_query()
+        location = self.service.group_b_location()
+        serpapi_key = self.db.get_setting("serpapi_key", "")
+        serp_disponible = bool(serpapi_key) and self.service.serpapi_remaining() > 0
+        run_id = self.db.start_run("B", day_key)
+
+        def tarea() -> dict:
+            nuevos: list[str] = []
+            fallos: list[str] = []
+            # JobSpy (LinkedIn + Indeed).
+            try:
+                js = JobSpySource(search_term=query, location=location, proxies=proxies)
+                nuevos.extend(self.service.ingest_jobs(js.fetch()))
+            except Exception as exc:  # noqa: BLE001
+                fallos.append(f"JobSpy: {type(exc).__name__}")
+            # SerpAPI (si hay key y cuota).
+            if serp_disponible:
+                try:
+                    sp = SerpApiSource(api_key=serpapi_key, query=query, location=location)
+                    nuevos.extend(self.service.ingest_jobs(sp.fetch()))
+                    self.db.increment_quota(self.service.serpapi_period())
+                except Exception as exc:  # noqa: BLE001
+                    fallos.append(f"SerpAPI: {type(exc).__name__}")
+            return {"nuevos": nuevos, "fallos": fallos, "run_id": run_id}
+
+        worker = Worker(tarea)
+        worker.signals.result.connect(self._group_b_listo)
+        worker.signals.error.connect(
+            lambda m: self.statusBar().showMessage(f"Error en Grupo B: {m}")
+        )
+        self.pool.start(worker)
+
+    def _group_b_listo(self, data: dict) -> None:
+        nuevos, fallos = data["nuevos"], data["fallos"]
+        self.db.finish_run(
+            data["run_id"], "error" if fallos and not nuevos else "ok",
+            ", ".join(fallos), len(nuevos),
+        )
+        self.inbox.refresh()
+        restante = self.service.serpapi_remaining()
+        msg = f"Grupo B: {len(nuevos)} vacantes nuevas. SerpAPI restante: {restante}."
+        if fallos:
+            msg += f"  Fallos: {', '.join(fallos)}"
+        self.statusBar().showMessage(msg)
+        self.left.set_estado(msg)
+        for uid in nuevos:
+            self._encolar_clasificacion(uid)
+
     def _encolar_clasificacion(self, uid: str) -> None:
         client = self.service.build_client()
         self._clasificando += 1

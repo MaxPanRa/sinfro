@@ -1,0 +1,3 @@
+# Normaliza saltos de línea: evita el ruido de "LF will be replaced by CRLF".
+* text=auto eol=lf
+*.py text eol=lf

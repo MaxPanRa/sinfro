@@ -118,6 +118,30 @@ class AppService:
         self.db.save_evaluation(uid, markdown, client.deep_model)
         return markdown
 
+    # -- Grupo B: query, ubicación y cuota SerpAPI ----------------------------
+
+    def build_group_b_query(self) -> str:
+        """Construye el término de búsqueda a partir de las keywords (máx 4)."""
+        kws = self.db.get_keywords()[:4]
+        return " ".join(kws) if kws else "desarrollador"
+
+    def group_b_location(self) -> str:
+        """Ubicación legible para JobSpy/SerpAPI según la selección del usuario."""
+        ub = self.db.get_setting("ubicacion", "")
+        if not ub or ub == "Toda la República":
+            return "México"
+        if ub == "Solo remoto internacional":
+            return "Remote"
+        return f"{ub}, México"
+
+    def serpapi_period(self) -> str:
+        return "serpapi:" + datetime.now().strftime("%Y-%m")
+
+    def serpapi_remaining(self) -> int:
+        from .config import SERPAPI_MONTHLY_QUOTA
+        usadas = self.db.get_quota_count(self.serpapi_period())
+        return max(0, SERPAPI_MONTHLY_QUOTA - usadas)
+
     # -- Utilidades de estado -------------------------------------------------
 
     def today_key(self) -> str:
