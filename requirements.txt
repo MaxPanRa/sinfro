@@ -6,6 +6,7 @@ PySide6>=6.6
 # HTTP y parsing de fuentes
 requests>=2.31
 feedparser>=6.0          # RSS de We Work Remotely
+beautifulsoup4>=4.12     # parsing del HTML de OCC Mundial
 
 # Scraping de LinkedIn/Indeed (Grupo B)
 python-jobspy>=1.1.70

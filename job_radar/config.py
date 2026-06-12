@@ -44,7 +44,7 @@ GROUP_A_INTERVAL_MIN = 20
 GROUP_B_WINDOWS = [(6, 0, 6, 5), (18, 0, 18, 5)]
 
 #: Cuota gratuita mensual de SerpAPI (búsquedas).
-SERPAPI_MONTHLY_QUOTA = 100
+SERPAPI_MONTHLY_QUOTA = 250
 
 # --- Catálogos para la UI ----------------------------------------------------
 

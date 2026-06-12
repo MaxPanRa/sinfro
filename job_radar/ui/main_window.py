@@ -73,8 +73,15 @@ class MainWindow(QMainWindow):
     # -- Acciones de menú -----------------------------------------------------
 
     def _abrir_ajustes(self) -> None:
-        dlg = SettingsDialog(self.db, self)
+        dlg = SettingsDialog(self.db, self.service, self.pool, self)
+        dlg.vacantes_nuevas.connect(self._tras_busqueda_manual)
         dlg.exec()
+
+    def _tras_busqueda_manual(self, nuevos: list) -> None:
+        """Refresca la bandeja y clasifica las vacantes de una búsqueda manual."""
+        self.inbox.refresh()
+        for uid in nuevos:
+            self._encolar_clasificacion(uid)
 
     def _about(self) -> None:
         QMessageBox.information(
@@ -143,7 +150,7 @@ class MainWindow(QMainWindow):
 
         Respeta la cuota mensual de SerpAPI y salta fuentes desactivadas (OCC).
         """
-        from ..sources import JobSpySource, SerpApiSource
+        from ..sources import JobSpySource, OCCSource, SerpApiSource
 
         proxies = self.service.proxies()
         query = self.service.build_group_b_query()
@@ -161,6 +168,12 @@ class MainWindow(QMainWindow):
                 nuevos.extend(self.service.ingest_jobs(js.fetch()))
             except Exception as exc:  # noqa: BLE001
                 fallos.append(f"JobSpy: {type(exc).__name__}")
+            # OCC Mundial (parsing HTML).
+            try:
+                occ = OCCSource(query=query, location=location, proxies=proxies)
+                nuevos.extend(self.service.ingest_jobs(occ.fetch()))
+            except Exception as exc:  # noqa: BLE001
+                fallos.append(f"OCC: {type(exc).__name__}")
             # SerpAPI (si hay key y cuota).
             if serp_disponible:
                 try:

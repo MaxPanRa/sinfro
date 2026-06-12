@@ -47,9 +47,11 @@ def main() -> int:
     # Bandeja: debe listar la vacante.
     assert win.inbox.lista.count() == 1, win.inbox.lista.count()
 
-    # Diálogo de ajustes: construye y carga.
-    dlg = SettingsDialog(db, win)
+    # Diálogo de ajustes: construye y carga (con service/pool para "Buscar ahora").
+    dlg = SettingsDialog(db, win.service, win.pool, win)
     assert dlg.fast_model.text() == "opencode-go/deepseek-v4-flash"
+    # La etiqueta de cuota SerpAPI debe mostrar 250/250 al inicio.
+    assert "250/250" in dlg.lbl_serp_quota.text(), dlg.lbl_serp_quota.text()
     dlg.close()
 
     # Popup de evaluación: pre-cacheamos para probar la ruta de caché (sin red).

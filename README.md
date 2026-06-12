@@ -51,12 +51,14 @@ opencode models
 
 ## 4. (Opcional) SerpAPI — Google for Jobs
 
-1. Crea una cuenta gratuita en https://serpapi.com (incluye ~100 búsquedas/mes).
+1. Crea una cuenta gratuita en https://serpapi.com (incluye **250 búsquedas/mes**).
 2. Copia tu **API key** desde el dashboard de SerpAPI.
 3. Pégala en **Ajustes → "API key de SerpAPI"**.
 
-La app lleva un contador mensual en la base de datos y deja de llamar al agotar la
-cuota, avisándolo en la barra de estado.
+En Ajustes verás las **búsquedas restantes del mes** (formato `X/250`) y un botón
+**"Buscar ahora (X/250)"** para lanzar una búsqueda de Google for Jobs al instante.
+La app lleva el contador mensual en la base de datos y deja de llamar al agotar la
+cuota, avisándolo en la UI.
 
 ## 5. Ejecutar (desarrollo)
 
@@ -99,7 +101,7 @@ job_radar/
   sources/             Una clase por fuente (interfaz común JobSource)
     base.py            Job + JobSource + dedup por hash título+empresa
     remoteok / remotive / weworkremotely / hackernews   (Grupo A)
-    jobspy_source / serpapi_source / occ                (Grupo B)
+    jobspy_source / serpapi_source / occ (OCC Mundial)  (Grupo B)
   ai/                  Shell-out a OpenCode con parser tolerante
     opencode_client.py Subprocess + inyección de key + parser JSON laxo
     classifier.py      Clasificación rápida (JSON)

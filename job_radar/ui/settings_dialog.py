@@ -7,25 +7,35 @@ toggle de proxy VPS y umbral de match.
 
 from __future__ import annotations
 
+from PySide6.QtCore import QThreadPool, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QSpinBox, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
+    QVBoxLayout, QWidget,
 )
 
-from ..config import NIVELES_INGLES
+from ..config import NIVELES_INGLES, SERPAPI_MONTHLY_QUOTA
 from ..db.database import Database
+from .workers import Worker
 
 
 class SettingsDialog(QDialog):
     """Modal de configuración global."""
 
-    def __init__(self, db: Database, parent: QWidget | None = None) -> None:
+    #: Emitida tras una búsqueda manual de SerpAPI con los uids nuevos ingeridos.
+    vacantes_nuevas = Signal(list)
+
+    def __init__(self, db: Database, service=None, pool: QThreadPool | None = None,
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.db = db
+        self.service = service
+        self.pool = pool or QThreadPool.globalInstance()
         self.setWindowTitle("Ajustes")
         self.setMinimumWidth(560)
         self._build()
         self._load()
+        self._update_serp_quota()
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
@@ -52,7 +62,14 @@ class SettingsDialog(QDialog):
         f_src = QFormLayout(grp_src)
         self.serpapi_key = QLineEdit()
         self.serpapi_key.setEchoMode(QLineEdit.Password)
+        self.serpapi_key.textChanged.connect(self._update_serp_quota)
         f_src.addRow("API key de SerpAPI:", self.serpapi_key)
+        # Búsquedas restantes este mes + botón "Buscar ahora".
+        self.lbl_serp_quota = QLabel("—")
+        f_src.addRow("Búsquedas Google restantes:", self.lbl_serp_quota)
+        self.btn_buscar_ahora = QPushButton("Buscar ahora")
+        self.btn_buscar_ahora.clicked.connect(self._buscar_ahora)
+        f_src.addRow("", self.btn_buscar_ahora)
         self.proxy_enabled = QCheckBox("Activar proxy VPS (para enmascarar IP)")
         self.proxy_host = QLineEdit()
         self.proxy_host.setPlaceholderText("host:puerto (ej. 1.2.3.4:8080)")
@@ -117,6 +134,72 @@ class SettingsDialog(QDialog):
         self.salario_periodo.setCurrentText(s.get("salario_periodo", "hora"))
         self.match_threshold.setValue(int(s.get("match_threshold", "70") or 0))
         self.dev_fast.setChecked(s.get("dev_fast_scheduler", "0") == "1")
+
+    # -- SerpAPI: cuota y búsqueda manual -------------------------------------
+
+    def _serp_remaining(self) -> int:
+        """Búsquedas restantes este mes (usa el servicio si está disponible)."""
+        if self.service is not None:
+            return self.service.serpapi_remaining()
+        from ..service import AppService
+        return AppService(self.db).serpapi_remaining()
+
+    def _update_serp_quota(self) -> None:
+        """Refresca la etiqueta y el botón con el contador X/250."""
+        restantes = self._serp_remaining()
+        self.lbl_serp_quota.setText(f"{restantes}/{SERPAPI_MONTHLY_QUOTA} este mes")
+        self.btn_buscar_ahora.setText(f"Buscar ahora ({restantes}/{SERPAPI_MONTHLY_QUOTA})")
+        tiene_key = bool(self.serpapi_key.text().strip())
+        self.btn_buscar_ahora.setEnabled(tiene_key and restantes > 0)
+
+    def _buscar_ahora(self) -> None:
+        """Lanza una búsqueda inmediata en Google for Jobs (SerpAPI) en un worker."""
+        if self.service is None:
+            QMessageBox.information(self, "No disponible",
+                                   "La búsqueda manual no está disponible en este contexto.")
+            return
+        key = self.serpapi_key.text().strip()
+        if not key:
+            QMessageBox.warning(self, "Falta la key", "Ingresa tu API key de SerpAPI.")
+            return
+        if self._serp_remaining() <= 0:
+            QMessageBox.warning(self, "Sin cuota",
+                                "Agotaste las búsquedas de SerpAPI de este mes.")
+            return
+        # Persiste la key para que la corrida y futuras llamadas la usen.
+        self.db.set_setting("serpapi_key", key)
+
+        from ..sources import SerpApiSource
+        service = self.service
+        query = service.build_group_b_query()
+        location = service.group_b_location()
+        self.btn_buscar_ahora.setEnabled(False)
+        self.btn_buscar_ahora.setText("Buscando en Google…")
+
+        def tarea() -> list[str]:
+            src = SerpApiSource(api_key=key, query=query, location=location)
+            nuevos = service.ingest_jobs(src.fetch())
+            self.db.increment_quota(service.serpapi_period())
+            return nuevos
+
+        worker = Worker(tarea)
+        worker.signals.result.connect(self._serp_listo)
+        worker.signals.error.connect(self._serp_error)
+        worker.signals.finished.connect(self._update_serp_quota)
+        self.pool.start(worker)
+
+    def _serp_listo(self, nuevos: list) -> None:
+        self._update_serp_quota()
+        QMessageBox.information(
+            self, "Búsqueda completada",
+            f"Google for Jobs: {len(nuevos)} vacantes nuevas ingeridas."
+        )
+        if nuevos:
+            self.vacantes_nuevas.emit(nuevos)
+
+    def _serp_error(self, msg: str) -> None:
+        self._update_serp_quota()
+        QMessageBox.warning(self, "Error en SerpAPI", msg)
 
     def _save_and_accept(self) -> None:
         pares = {
