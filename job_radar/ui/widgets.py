@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
-    QLabel, QLayout, QLayoutItem, QPushButton, QSizePolicy, QWidget, QHBoxLayout,
+    QComboBox, QLabel, QLayout, QLayoutItem, QPushButton, QSizePolicy, QWidget,
+    QHBoxLayout,
 )
 
 
@@ -81,23 +83,143 @@ class Chip(QWidget):
         super().__init__(parent)
         self._text = text
         self.setObjectName("Chip")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 4, 4, 4)
+        layout.setContentsMargins(9, 1, 4, 1)
         layout.setSpacing(4)
         label = QLabel(text)
-        label.setStyleSheet("background: transparent;")
-        boton = QPushButton("×")
-        boton.setFixedSize(18, 18)
+        label.setStyleSheet("background:transparent;color:#1f2933;font-size:11px;")
+        boton = QPushButton("✕")
+        boton.setFixedSize(16, 16)
         boton.setCursor(Qt.PointingHandCursor)
+        boton.setToolTip("Quitar")
         boton.setStyleSheet(
-            "QPushButton{border:none;border-radius:9px;background:#0f766e;"
-            "color:white;font-weight:bold;} QPushButton:hover{background:#115e59;}"
+            "QPushButton{border:1px solid #475569;border-radius:8px;background:#ffffff;"
+            "color:#334155;font-weight:bold;font-size:11px;padding:0;}"
+            "QPushButton:hover{background:#ef4444;color:white;border-color:#ef4444;}"
         )
         boton.clicked.connect(lambda: self.removed.emit(self._text))
         layout.addWidget(label)
         layout.addWidget(boton)
         self.setStyleSheet(
-            "#Chip{background:#ccfbf1;border:1px solid #5eead4;border-radius:12px;}"
-            "QLabel{color:#134e4a;}"
+            "#Chip{background:#eef2f7;border:1px solid #475569;border-radius:11px;}"
         )
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+
+class SkillBadge(QWidget):
+    """Badge de tecnología: "Nombre (nivel)" con la bolita del nivel más oscura.
+
+    Amarillo = detectada del CV, naranja claro = manual. Un clic edita el nivel;
+    doble clic la elimina. Emite los ids de la tecnología.
+    """
+
+    edit_requested = Signal(int)
+    delete_requested = Signal(int)
+
+    #: Paleta por origen: (fondo, borde, color de la bolita del nivel).
+    _COLORS = {
+        "cv": ("#fde68a", "#d4a017", "#b45309"),       # amarillo
+        "manual": ("#fed7aa", "#f59e6a", "#c2410c"),   # naranja claro
+    }
+
+    def __init__(self, tech: dict, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.tech_id = int(tech["id"])
+        self.setObjectName("SkillBadge")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Clic: editar nivel · Doble clic: eliminar")
+
+        bg, borde, circ = self._COLORS.get(
+            tech.get("origin", "manual"), self._COLORS["manual"])
+        self.setStyleSheet(
+            f"#SkillBadge{{background:{bg};border:1px solid {borde};border-radius:11px;}}")
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(9, 1, 4, 1)
+        lay.setSpacing(5)
+        nombre = QLabel(str(tech["name"]))
+        nombre.setStyleSheet(
+            "background:transparent;color:#3f2d00;font-size:11px;font-weight:600;")
+        bolita = QLabel(str(tech["level"]))
+        bolita.setFixedSize(18, 18)
+        bolita.setAlignment(Qt.AlignCenter)
+        bolita.setStyleSheet(
+            f"background:{circ};color:white;border-radius:9px;"
+            "font-size:10px;font-weight:bold;")
+        lay.addWidget(nombre)
+        lay.addWidget(bolita)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        # Distingue clic (editar) de doble clic (eliminar) con un temporizador.
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(220)
+        self._click_timer.timeout.connect(
+            lambda: self.edit_requested.emit(self.tech_id))
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self._click_timer.start()
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        self._click_timer.stop()
+        self.delete_requested.emit(self.tech_id)
+
+
+class CheckableComboBox(QComboBox):
+    """Combo de selección múltiple con casillas; el popup no se cierra al elegir."""
+
+    changed = Signal()
+
+    def __init__(self, placeholder: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setModel(QStandardItemModel(self))
+        self.setEditable(True)
+        self.lineEdit().setReadOnly(True)
+        self.lineEdit().setPlaceholderText(placeholder)
+        self.lineEdit().installEventFilter(self)
+        self.view().viewport().installEventFilter(self)
+
+    def addItems(self, textos: list[str]) -> None:  # noqa: N802 — API Qt
+        for t in textos:
+            self.add_check_item(t)
+
+    def add_check_item(self, texto: str, checked: bool = False) -> None:
+        item = QStandardItem(texto)
+        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+        item.setData(Qt.Checked if checked else Qt.Unchecked, Qt.CheckStateRole)
+        self.model().appendRow(item)
+        self._update_text()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self.lineEdit() and event.type() == QEvent.MouseButtonRelease:
+            self.showPopup()
+            return True
+        if obj is self.view().viewport() and event.type() == QEvent.MouseButtonRelease:
+            idx = self.view().indexAt(event.position().toPoint())
+            item = self.model().itemFromIndex(idx)
+            if item is not None:
+                nuevo = Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked
+                item.setCheckState(nuevo)
+                self._update_text()
+                self.changed.emit()
+            return True  # mantiene el popup abierto
+        return super().eventFilter(obj, event)
+
+    def checked_items(self) -> list[str]:
+        m = self.model()
+        return [m.item(i).text() for i in range(m.rowCount())
+                if m.item(i).checkState() == Qt.Checked]
+
+    def set_checked(self, textos: list[str]) -> None:
+        objetivo = set(textos)
+        m = self.model()
+        for i in range(m.rowCount()):
+            it = m.item(i)
+            it.setCheckState(Qt.Checked if it.text() in objetivo else Qt.Unchecked)
+        self._update_text()
+
+    def _update_text(self) -> None:
+        self.lineEdit().setText(", ".join(self.checked_items()))

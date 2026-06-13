@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
 
         Respeta la cuota mensual de SerpAPI y salta fuentes desactivadas (OCC).
         """
-        from ..sources import JobSpySource, OCCSource, SerpApiSource
+        from ..sources import JobSpySource, JoobleSource, OCCSource, SerpApiSource
 
         proxies = self.service.proxies()
         query = self.service.build_group_b_query()
@@ -172,6 +172,8 @@ class MainWindow(QMainWindow):
         serpapi_location = self.service.serpapi_location()
         serpapi_key = self.db.get_setting("serpapi_key", "")
         serp_disponible = bool(serpapi_key) and self.service.serpapi_remaining() > 0
+        jooble_key = self.db.get_setting("jooble_api_key", "")
+        jooble_disponible = bool(jooble_key) and self.service.jooble_remaining() > 0
         run_id = self.db.start_run("B", day_key)
 
         def tarea() -> dict:
@@ -201,6 +203,19 @@ class MainWindow(QMainWindow):
                     self.db.increment_quota(self.service.serpapi_period())
                 except Exception as exc:  # noqa: BLE001
                     fallos.append(f"SerpAPI: {type(exc).__name__}")
+            # Jooble MX (si hay key y cuota).
+            if jooble_disponible:
+                try:
+                    jooble = JoobleSource(
+                        api_key=jooble_key,
+                        keywords=self.service.build_jooble_query(),
+                        location=self.service.group_b_location(),
+                        proxies=proxies,
+                    )
+                    nuevos.extend(self.service.ingest_jobs(jooble.fetch()))
+                    self.db.increment_quota(self.service.jooble_period())
+                except Exception as exc:  # noqa: BLE001
+                    fallos.append(f"Jooble: {type(exc).__name__}")
             return {"nuevos": nuevos, "fallos": fallos, "run_id": run_id}
 
         worker = Worker(tarea)
@@ -218,7 +233,10 @@ class MainWindow(QMainWindow):
         )
         self.inbox.refresh()
         restante = self.service.serpapi_remaining()
-        msg = f"Grupo B: {len(nuevos)} vacantes nuevas. SerpAPI restante: {restante}."
+        msg = (
+            f"Grupo B: {len(nuevos)} vacantes nuevas. "
+            f"SerpAPI restante: {restante}. Jooble restante: {self.service.jooble_remaining()}."
+        )
         if fallos:
             msg += f"  Fallos: {', '.join(fallos)}"
         self.statusBar().showMessage(msg)

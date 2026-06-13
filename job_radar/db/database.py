@@ -222,6 +222,13 @@ class Database:
             (name, level, origin),
         )
 
+    def update_technology_level(self, tech_id: int, level: int) -> None:
+        """Actualiza solo el nivel de una tecnología (CV o manual) por id."""
+        self._execute(
+            "UPDATE technologies SET level = ? WHERE id = ?",
+            (max(1, min(10, int(level))), tech_id),
+        )
+
     def remove_technology(self, tech_id: int) -> None:
         self._execute("DELETE FROM technologies WHERE id = ?", (tech_id,))
 

@@ -50,6 +50,9 @@ GROUP_B_WINDOWS = [(6, 0, 6, 5), (18, 0, 18, 5)]
 #: Cuota gratuita mensual de SerpAPI (búsquedas).
 SERPAPI_MONTHLY_QUOTA = 250
 
+#: Cuota mensual de Jooble configurada para este proyecto.
+JOOBLE_MONTHLY_QUOTA = 500
+
 # --- Catálogos para la UI ----------------------------------------------------
 
 #: Keywords precargadas como placeholders iniciales.
@@ -96,6 +99,8 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "use_free_fallback": "0",
     "free_model": DEFAULT_FREE_MODEL,
     "serpapi_key": "",
+    "jooble_api_key": "",
+    "ats_company": "",
     "ubicacion": "Toda la República",
     "nivel_ingles": "B2",
     "salario_monto": "25",

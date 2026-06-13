@@ -9,7 +9,12 @@ from typing import Any
 
 from .ai.evaluator import evaluate_job
 from .ai.opencode_client import OpenCodeClient
-from .config import OPENCODE_TIMEOUT_DEEP, OPENCODE_TIMEOUT_FAST
+from .config import (
+    JOOBLE_MONTHLY_QUOTA,
+    OPENCODE_TIMEOUT_DEEP,
+    OPENCODE_TIMEOUT_FAST,
+    SERPAPI_MONTHLY_QUOTA,
+)
 from .db.database import Database
 from .sources.base import Job
 
@@ -389,6 +394,9 @@ class AppService:
             query = f"{query} remote"
         return query
 
+    def build_jooble_query(self) -> str:
+        return self.build_serpapi_query()
+
     def group_b_location(self) -> str:
         ub = self.db.get_setting("ubicacion", "")
         if not ub or ub == "Toda la República":
@@ -412,10 +420,15 @@ class AppService:
         return "serpapi:" + datetime.now().strftime("%Y-%m")
 
     def serpapi_remaining(self) -> int:
-        from .config import SERPAPI_MONTHLY_QUOTA
-
         usadas = self.db.get_quota_count(self.serpapi_period())
         return max(0, SERPAPI_MONTHLY_QUOTA - usadas)
+
+    def jooble_period(self) -> str:
+        return "jooble:" + datetime.now().strftime("%Y-%m")
+
+    def jooble_remaining(self) -> int:
+        usadas = self.db.get_quota_count(self.jooble_period())
+        return max(0, JOOBLE_MONTHLY_QUOTA - usadas)
 
     # -- Utilidades de estado -------------------------------------------------
 

@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from PySide6.QtCore import QThreadPool, Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
-    QScrollArea, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QInputDialog,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ..config import DEFAULT_KEYWORDS, MODALIDADES, UBICACIONES
 from ..db.database import Database
 from ..profile.cv_parser import analyze_cv, extract_cv_text
 from ..service import AppService
-from .widgets import Chip, FlowLayout
+from .widgets import CheckableComboBox, Chip, FlowLayout, SkillBadge
 from .workers import Worker
 
 
@@ -48,19 +48,27 @@ class LeftPanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
         col = QVBoxLayout(contenido)
+        col.setContentsMargins(8, 8, 8, 8)
+        col.setSpacing(7)
 
         col.addWidget(self._build_keywords())
-        col.addWidget(self._build_modalidad())
-        col.addWidget(self._build_ubicacion())
+        col.addWidget(self._build_modalidad_ubicacion())
         col.addWidget(self._build_tecnologias())
         col.addWidget(self._build_cv())
         col.addWidget(self._build_opciones())
         col.addWidget(self._build_control())
         col.addStretch(1)
 
+    @staticmethod
+    def _mini_label(texto: str) -> QLabel:
+        lbl = QLabel(texto)
+        lbl.setStyleSheet("color:#475569;font-size:10px;font-weight:bold;")
+        return lbl
+
     def _build_keywords(self) -> QGroupBox:
         grp = QGroupBox("Palabras clave")
         v = QVBoxLayout(grp)
+        v.setSpacing(5)
         fila = QHBoxLayout()
         self.kw_input = QLineEdit()
         self.kw_input.setPlaceholderText("Escribe una palabra clave…")
@@ -71,35 +79,41 @@ class LeftPanel(QWidget):
         fila.addWidget(btn)
         v.addLayout(fila)
         self.kw_container = QWidget()
-        self.kw_flow = FlowLayout(self.kw_container)
+        self.kw_flow = FlowLayout(self.kw_container, spacing=3)
         v.addWidget(self.kw_container)
         return grp
 
-    def _build_modalidad(self) -> QGroupBox:
-        grp = QGroupBox("Modalidad")
+    def _build_modalidad_ubicacion(self) -> QGroupBox:
+        """Modalidad (multi-select) y Ubicación en la misma fila."""
+        grp = QGroupBox("Modalidad y ubicación")
         h = QHBoxLayout(grp)
-        self.modalidad_checks: dict[str, QCheckBox] = {}
-        for m in MODALIDADES:
-            cb = QCheckBox(m)
-            cb.stateChanged.connect(self._save_modalidad)
-            self.modalidad_checks[m] = cb
-            h.addWidget(cb)
-        return grp
+        h.setSpacing(8)
 
-    def _build_ubicacion(self) -> QGroupBox:
-        grp = QGroupBox("Ubicación")
-        v = QVBoxLayout(grp)
+        col_m = QVBoxLayout()
+        col_m.setSpacing(2)
+        col_m.addWidget(self._mini_label("Modalidad"))
+        self.modalidad_combo = CheckableComboBox("Cualquiera")
+        self.modalidad_combo.addItems(MODALIDADES)
+        self.modalidad_combo.changed.connect(self._save_modalidad)
+        col_m.addWidget(self.modalidad_combo)
+        h.addLayout(col_m, 1)
+
+        col_u = QVBoxLayout()
+        col_u.setSpacing(2)
+        col_u.addWidget(self._mini_label("Ubicación"))
         self.ubicacion = QComboBox()
         self.ubicacion.addItems(UBICACIONES)
         self.ubicacion.currentTextChanged.connect(
             lambda t: self.db.set_setting("ubicacion", t)
         )
-        v.addWidget(self.ubicacion)
+        col_u.addWidget(self.ubicacion)
+        h.addLayout(col_u, 1)
         return grp
 
     def _build_tecnologias(self) -> QGroupBox:
         grp = QGroupBox("Mis tecnologías")
         v = QVBoxLayout(grp)
+        v.setSpacing(5)
         fila = QHBoxLayout()
         self.tech_input = QLineEdit()
         self.tech_input.setPlaceholderText("Tecnología…")
@@ -110,31 +124,62 @@ class LeftPanel(QWidget):
         btn = QPushButton("Agregar")
         btn.clicked.connect(self._add_tech)
         self.tech_input.returnPressed.connect(self._add_tech)
-        fila.addWidget(self.tech_input)
+        fila.addWidget(self.tech_input, 1)
         fila.addWidget(self.tech_level)
         fila.addWidget(btn)
         v.addLayout(fila)
-        self.tech_list = QListWidget()
-        self.tech_list.setMaximumHeight(160)
-        v.addWidget(self.tech_list)
-        ayuda = QLabel("Doble clic en una fila para eliminarla.")
-        ayuda.setStyleSheet("color:gray;font-size:11px;")
-        v.addWidget(ayuda)
-        self.tech_list.itemDoubleClicked.connect(self._remove_tech)
+
+        self.tech_container = QWidget()
+        self.tech_flow = FlowLayout(self.tech_container, spacing=4)
+        v.addWidget(self.tech_container)
+
+        v.addWidget(self._build_tech_legend())
         return grp
+
+    def _build_tech_legend(self) -> QWidget:
+        """Leyenda: colores por origen y cómo editar/eliminar."""
+        cont = QWidget()
+        h = QHBoxLayout(cont)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+
+        def swatch(color: str, texto: str) -> QWidget:
+            w = QWidget()
+            hh = QHBoxLayout(w)
+            hh.setContentsMargins(0, 0, 0, 0)
+            hh.setSpacing(4)
+            q = QLabel()
+            q.setFixedSize(12, 12)
+            q.setStyleSheet(
+                f"background:{color};border:1px solid #94a3b8;border-radius:3px;")
+            t = QLabel(texto)
+            t.setStyleSheet("color:#52606d;font-size:10px;")
+            hh.addWidget(q)
+            hh.addWidget(t)
+            return w
+
+        h.addWidget(swatch("#fde68a", "del CV"))
+        h.addWidget(swatch("#fed7aa", "manual"))
+        ayuda = QLabel("· clic: editar nivel · doble clic: eliminar")
+        ayuda.setStyleSheet("color:#52606d;font-size:10px;")
+        h.addWidget(ayuda)
+        h.addStretch(1)
+        return cont
 
     def _build_cv(self) -> QGroupBox:
         grp = QGroupBox("Mi CV y perfil")
         v = QVBoxLayout(grp)
+        v.setSpacing(5)
         self.btn_cv = QPushButton("Cargar CV (PDF o DOCX)")
         self.btn_cv.clicked.connect(self._cargar_cv)
         v.addWidget(self.btn_cv)
-        v.addWidget(QLabel("Resumen del perfil (editable, se usa en cada evaluación):"))
+        v.addWidget(self._mini_label(
+            "Resumen del perfil (editable, se usa en cada evaluación):"))
         self.perfil_summary = QTextEdit()
         self.perfil_summary.setPlaceholderText(
             "Se autocompleta al cargar el CV; puedes editarlo."
         )
-        self.perfil_summary.setMaximumHeight(120)
+        self.perfil_summary.setMinimumHeight(170)
         self.perfil_summary.textChanged.connect(self._save_summary)
         v.addWidget(self.perfil_summary)
         return grp
@@ -174,11 +219,10 @@ class LeftPanel(QWidget):
         self.perfil_summary.setPlainText(self.db.get_profile_summary())
         self.perfil_summary.blockSignals(False)
         s = self.db.get_all_settings()
-        sel = set((s.get("modalidades", "") or "").split(","))
-        for m, cb in self.modalidad_checks.items():
-            cb.blockSignals(True)
-            cb.setChecked(m in sel)
-            cb.blockSignals(False)
+        sel = [m for m in (s.get("modalidades", "") or "").split(",") if m]
+        self.modalidad_combo.blockSignals(True)
+        self.modalidad_combo.set_checked(sel)
+        self.modalidad_combo.blockSignals(False)
         ub = s.get("ubicacion", "")
         if ub:
             i = self.ubicacion.findText(ub)
@@ -211,8 +255,7 @@ class LeftPanel(QWidget):
     # -- Modalidad / opciones -------------------------------------------------
 
     def _save_modalidad(self) -> None:
-        sel = [m for m, cb in self.modalidad_checks.items() if cb.isChecked()]
-        self.db.set_setting("modalidades", ",".join(sel))
+        self.db.set_setting("modalidades", ",".join(self.modalidad_combo.checked_items()))
 
     def _on_repetidas(self) -> None:
         self.db.set_setting(
@@ -233,18 +276,31 @@ class LeftPanel(QWidget):
             self._refresh_techs()
 
     def _refresh_techs(self) -> None:
-        self.tech_list.clear()
+        while self.tech_flow.count():
+            item = self.tech_flow.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
         for t in self.db.get_technologies():
-            etiqueta = f"{t['name']}  —  nivel {t['level']}/10  ({t['origin']})"
-            item = QListWidgetItem(etiqueta)
-            item.setData(Qt.UserRole, t["id"])
-            self.tech_list.addItem(item)
+            badge = SkillBadge(t)
+            badge.edit_requested.connect(self._edit_tech)
+            badge.delete_requested.connect(self._delete_tech)
+            self.tech_flow.addWidget(badge)
 
-    def _remove_tech(self, item: QListWidgetItem) -> None:
-        tech_id = item.data(Qt.UserRole)
-        if tech_id is not None:
-            self.db.remove_technology(int(tech_id))
+    def _edit_tech(self, tech_id: int) -> None:
+        tech = next(
+            (t for t in self.db.get_technologies() if t["id"] == tech_id), None)
+        if not tech:
+            return
+        nivel, ok = QInputDialog.getInt(
+            self, "Editar nivel", f"Nivel de {tech['name']} (1-10):",
+            int(tech["level"]), 1, 10)
+        if ok:
+            self.db.update_technology_level(tech_id, nivel)
             self._refresh_techs()
+
+    def _delete_tech(self, tech_id: int) -> None:
+        self.db.remove_technology(int(tech_id))
+        self._refresh_techs()
 
     # -- Perfil ---------------------------------------------------------------
 

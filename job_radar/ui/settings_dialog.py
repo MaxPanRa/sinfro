@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..config import NIVELES_INGLES, SERPAPI_MONTHLY_QUOTA
+from ..config import JOOBLE_MONTHLY_QUOTA, NIVELES_INGLES, SERPAPI_MONTHLY_QUOTA
 from ..db.database import Database
 from .workers import Worker
 
@@ -37,6 +37,7 @@ class SettingsDialog(QDialog):
         self._build()
         self._load()
         self._update_serp_quota()
+        self._update_jooble_quota()
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
@@ -75,6 +76,21 @@ class SettingsDialog(QDialog):
         self.btn_buscar_ahora = QPushButton("Buscar ahora")
         self.btn_buscar_ahora.clicked.connect(self._buscar_ahora)
         f_src.addRow("", self.btn_buscar_ahora)
+        self.jooble_key = QLineEdit()
+        self.jooble_key.setEchoMode(QLineEdit.Password)
+        self.jooble_key.textChanged.connect(self._update_jooble_quota)
+        f_src.addRow("API key de Jooble:", self.jooble_key)
+        self.lbl_jooble_quota = QLabel("—")
+        f_src.addRow("Busquedas Jooble restantes:", self.lbl_jooble_quota)
+        self.btn_buscar_jooble = QPushButton("Buscar Jooble MX")
+        self.btn_buscar_jooble.clicked.connect(self._buscar_jooble)
+        f_src.addRow("", self.btn_buscar_jooble)
+        self.ats_company = QLineEdit()
+        self.ats_company.setPlaceholderText("slug o empresa: zillow, rippling, stripe...")
+        f_src.addRow("Empresa / ATS:", self.ats_company)
+        self.btn_buscar_empresa = QPushButton("Buscar empresa ATS")
+        self.btn_buscar_empresa.clicked.connect(self._buscar_empresa_ats)
+        f_src.addRow("", self.btn_buscar_empresa)
         self.group_b_hour = QComboBox()
         for h in range(12):
             am = 12 if h == 0 else h
@@ -150,6 +166,8 @@ class SettingsDialog(QDialog):
         self.use_free.setChecked(s.get("use_free_fallback", "0") == "1")
         self.free_model.setText(s.get("free_model", ""))
         self.serpapi_key.setText(s.get("serpapi_key", ""))
+        self.jooble_key.setText(s.get("jooble_api_key", ""))
+        self.ats_company.setText(s.get("ats_company", ""))
         idx_hour = self.group_b_hour.findData(s.get("group_b_hour", "6"))
         self.group_b_hour.setCurrentIndex(max(0, idx_hour))
         self.proxy_enabled.setChecked(s.get("proxy_enabled", "0") == "1")
@@ -178,6 +196,21 @@ class SettingsDialog(QDialog):
         self.btn_buscar_ahora.setText(f"Buscar ahora ({restantes}/{SERPAPI_MONTHLY_QUOTA})")
         tiene_key = bool(self.serpapi_key.text().strip())
         self.btn_buscar_ahora.setEnabled(tiene_key and restantes > 0)
+
+    def _jooble_remaining(self) -> int:
+        if self.service is not None:
+            return self.service.jooble_remaining()
+        from ..service import AppService
+        return AppService(self.db).jooble_remaining()
+
+    def _update_jooble_quota(self) -> None:
+        restantes = self._jooble_remaining()
+        self.lbl_jooble_quota.setText(f"{restantes}/{JOOBLE_MONTHLY_QUOTA} este mes")
+        self.btn_buscar_jooble.setText(
+            f"Buscar Jooble MX ({restantes}/{JOOBLE_MONTHLY_QUOTA})"
+        )
+        tiene_key = bool(self.jooble_key.text().strip())
+        self.btn_buscar_jooble.setEnabled(tiene_key and restantes > 0)
 
     def _buscar_ahora(self) -> None:
         """Lanza una búsqueda inmediata en Google for Jobs (SerpAPI) en un worker."""
@@ -215,6 +248,79 @@ class SettingsDialog(QDialog):
         worker.signals.finished.connect(self._update_serp_quota)
         self.pool.start(worker)
 
+    def _buscar_jooble(self) -> None:
+        if self.service is None:
+            QMessageBox.information(self, "No disponible",
+                                    "La busqueda manual no esta disponible en este contexto.")
+            return
+        key = self.jooble_key.text().strip()
+        if not key:
+            QMessageBox.warning(self, "Falta la key", "Ingresa tu API key de Jooble.")
+            return
+        if self._jooble_remaining() <= 0:
+            QMessageBox.warning(self, "Sin cuota", "Agotaste las busquedas de Jooble de este mes.")
+            return
+        self.db.set_setting("jooble_api_key", key)
+
+        from ..sources import JoobleSource
+        service = self.service
+        self.btn_buscar_jooble.setEnabled(False)
+        self.btn_buscar_jooble.setText("Buscando en Jooble...")
+
+        def tarea() -> list[str]:
+            src = JoobleSource(
+                api_key=key,
+                keywords=service.build_jooble_query(),
+                location=service.group_b_location(),
+            )
+            nuevos = service.ingest_jobs(src.fetch())
+            self.db.increment_quota(service.jooble_period())
+            return nuevos
+
+        worker = Worker(tarea)
+        worker.signals.result.connect(self._jooble_listo)
+        worker.signals.error.connect(self._jooble_error)
+        worker.signals.finished.connect(self._update_jooble_quota)
+        self.pool.start(worker)
+
+    def _buscar_empresa_ats(self) -> None:
+        if self.service is None:
+            QMessageBox.information(self, "No disponible",
+                                    "La busqueda manual no esta disponible en este contexto.")
+            return
+        company = self.ats_company.text().strip()
+        if not company:
+            QMessageBox.warning(self, "Falta empresa", "Ingresa una empresa o slug ATS.")
+            return
+        self.db.set_setting("ats_company", company)
+        key = self.jooble_key.text().strip()
+        use_jooble = bool(key) and self._jooble_remaining() > 0
+        if key:
+            self.db.set_setting("jooble_api_key", key)
+
+        from ..sources import ATSCompanySource, JoobleSource
+        service = self.service
+        self.btn_buscar_empresa.setEnabled(False)
+        self.btn_buscar_empresa.setText("Buscando empresa...")
+
+        def tarea() -> list[str]:
+            jobs = ATSCompanySource(company=company).fetch()
+            if use_jooble:
+                jobs.extend(JoobleSource(
+                    api_key=key,
+                    keywords=company,
+                    location=service.group_b_location(),
+                    companysearch=True,
+                ).fetch())
+                self.db.increment_quota(service.jooble_period())
+            return service.ingest_jobs(jobs)
+
+        worker = Worker(tarea)
+        worker.signals.result.connect(self._empresa_lista)
+        worker.signals.error.connect(self._empresa_error)
+        worker.signals.finished.connect(self._empresa_finished)
+        self.pool.start(worker)
+
     def _serp_listo(self, nuevos: list) -> None:
         self._update_serp_quota()
         QMessageBox.information(
@@ -227,6 +333,37 @@ class SettingsDialog(QDialog):
     def _serp_error(self, msg: str) -> None:
         self._update_serp_quota()
         QMessageBox.warning(self, "Error en SerpAPI", msg)
+
+    def _jooble_listo(self, nuevos: list) -> None:
+        self._update_jooble_quota()
+        QMessageBox.information(
+            self, "Busqueda completada",
+            f"Jooble MX: {len(nuevos)} vacantes nuevas ingeridas.",
+        )
+        if nuevos:
+            self.vacantes_nuevas.emit(nuevos)
+
+    def _jooble_error(self, msg: str) -> None:
+        self._update_jooble_quota()
+        QMessageBox.warning(self, "Error en Jooble", msg)
+
+    def _empresa_lista(self, nuevos: list) -> None:
+        self._update_jooble_quota()
+        QMessageBox.information(
+            self, "Busqueda completada",
+            f"Empresa/ATS: {len(nuevos)} vacantes nuevas ingeridas.",
+        )
+        if nuevos:
+            self.vacantes_nuevas.emit(nuevos)
+
+    def _empresa_error(self, msg: str) -> None:
+        self._update_jooble_quota()
+        QMessageBox.warning(self, "Error en empresa/ATS", msg)
+
+    def _empresa_finished(self) -> None:
+        self._update_jooble_quota()
+        self.btn_buscar_empresa.setEnabled(True)
+        self.btn_buscar_empresa.setText("Buscar empresa ATS")
 
     def _limpiar_datos(self) -> None:
         ok = QMessageBox.question(
@@ -257,6 +394,8 @@ class SettingsDialog(QDialog):
             "use_free_fallback": "1" if self.use_free.isChecked() else "0",
             "free_model": self.free_model.text().strip(),
             "serpapi_key": self.serpapi_key.text().strip(),
+            "jooble_api_key": self.jooble_key.text().strip(),
+            "ats_company": self.ats_company.text().strip(),
             "proxy_enabled": "1" if self.proxy_enabled.isChecked() else "0",
             "proxy_host": self.proxy_host.text().strip(),
             "nivel_ingles": self.nivel_ingles.currentText(),
