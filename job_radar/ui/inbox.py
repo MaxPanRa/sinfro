@@ -34,6 +34,16 @@ SCORE_ROJO = "#dc2626"
 SCORE_PRELIM_BG = "#e5e7eb"        # gris claro: preliminar
 SCORE_PRELIM_FG = "#4b5563"        # gris oscuro
 
+# --- Tinte CLARO del fondo de la fila según compatibilidad (no vistas) --------
+ROW_TINT = {
+    SCORE_VERDE: "#e7f6ec",        # compatible
+    SCORE_AMARILLO: "#fcf6d8",     # -20
+    SCORE_NARANJA: "#fdeede",      # -40
+    SCORE_ROJO: "#fbe4e2",         # bajo
+}
+ROW_TINT_PRELIM = "#f3f4f6"        # gris muy claro: preliminar sin analizar
+ROW_BORDE_PRELIM = "#cbd2d9"
+
 _COMP_PREFIX_RE = re.compile(r"^\s*COMP\s+(?:PRELIM|IA)\s+\d+%\s*-?\s*", re.IGNORECASE)
 
 
@@ -54,7 +64,7 @@ class JobRow(QWidget):
     def __init__(self, job: dict, threshold: int) -> None:
         super().__init__()
         self.setObjectName("JobRow")
-        self.setStyleSheet(self._row_style(job))
+        self.setStyleSheet(self._row_style(job, threshold))
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -148,7 +158,13 @@ class JobRow(QWidget):
     # -- Estilos / helpers ----------------------------------------------------
 
     @staticmethod
-    def _row_style(job: dict) -> str:
+    def _row_style(job: dict, threshold: int) -> str:
+        """Fondo de la fila según su estado/compatibilidad.
+
+        Estados explícitos mandan (aplicada=verde, descartada=rojo, vista=amarillo).
+        Las NO vistas se tintan con un tono claro según su compatibilidad (heatmap):
+        verde/amarillo/naranja/rojo, o gris si aún es preliminar (sin analizar).
+        """
         base = "#JobRow{{background:{bg};border-left:4px solid {borde};}}"
         if job.get("applied"):
             return base.format(bg=COLOR_APLICADA_BG, borde=COLOR_APLICADA_BORDE)
@@ -156,7 +172,12 @@ class JobRow(QWidget):
             return base.format(bg=COLOR_DESCARTADA_BG, borde=COLOR_DESCARTADA_BORDE)
         if job.get("seen"):
             return base.format(bg=COLOR_VISTA_BG, borde=COLOR_VISTA_BORDE)
-        return "#JobRow{background:#ffffff;border-left:4px solid transparent;}"
+        # No vista → tinte por compatibilidad.
+        score = job.get("quick_score")
+        if score is None:
+            return base.format(bg=ROW_TINT_PRELIM, borde=ROW_BORDE_PRELIM)
+        color = score_color(int(score), threshold)
+        return base.format(bg=ROW_TINT.get(color, "#ffffff"), borde=color)
 
     @staticmethod
     def _summary(job: dict) -> str:
@@ -264,13 +285,13 @@ class Inbox(QWidget):
             hh.addWidget(etiqueta)
             return w
 
-        leyenda = QLabel("Filas:")
+        leyenda = QLabel("Fila:")
         leyenda.setStyleSheet("color:#52606d;font-size:10px;font-weight:bold;")
         h.addWidget(leyenda)
         h.addWidget(chip(COLOR_APLICADA_BG, "Aplicada"))
-        h.addWidget(chip(COLOR_VISTA_BG, "Vista/analizada"))
+        h.addWidget(chip(COLOR_VISTA_BG, "Vista"))
         h.addWidget(chip(COLOR_DESCARTADA_BG, "Descartada"))
-        sep = QLabel("│ %:")
+        sep = QLabel("│ No vista (tinte) y %:")
         sep.setStyleSheet("color:#9aa5b1;font-size:10px;font-weight:bold;")
         h.addWidget(sep)
         h.addWidget(chip(SCORE_PRELIM_BG, "¿?=preliminar", SCORE_PRELIM_FG))
