@@ -70,6 +70,10 @@ class JobRow(QWidget):
     def __init__(self, job: dict, threshold: int) -> None:
         super().__init__()
         self.setObjectName("JobRow")
+        # CRÍTICO: un QWidget plano NO pinta el 'background' del stylesheet sin
+        # este atributo (solo los QLabel hijos lo hacían). Por eso el fondo de la
+        # fila salía blanco aunque el estilo se aplicara.
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(self._row_style(job, threshold))
 
         root = QHBoxLayout(self)
