@@ -8,12 +8,12 @@ from PySide6.QtCore import QThreadPool, QTimer, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabWidget,
-    QTextBrowser, QVBoxLayout, QWidget,
+    QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ..db.database import Database
 from ..service import AppService
-from .eval_render import render_eval_html, render_job_html
+from .eval_render import render_eval_html
 
 
 class EvaluationDialog(QDialog):
@@ -55,11 +55,7 @@ class EvaluationDialog(QDialog):
         self.viewer.setStyleSheet("QTextBrowser{border:none;background:#ffffff;}")
         self.tabs.addTab(self.viewer, "🔍  Análisis")
 
-        self.raw_viewer = QTextBrowser()
-        self.raw_viewer.setOpenExternalLinks(True)
-        self.raw_viewer.setStyleSheet("QTextBrowser{border:none;background:#ffffff;}")
-        self.raw_viewer.setHtml(render_job_html(self.job))
-        self.tabs.addTab(self.raw_viewer, "📄  Vacante original")
+        self.tabs.addTab(self._build_raw_tab(), "📄  Vacante (editable)")
         v.addWidget(self.tabs, 1)
 
         self.lbl_status = QLabel("")
@@ -129,6 +125,64 @@ class EvaluationDialog(QDialog):
                   self.btn_descartar, self.btn_cerrar):
             botones.addWidget(b)
         return botones
+
+    def _build_raw_tab(self) -> QWidget:
+        """Pestaña con el contenido de la vacante EDITABLE (mejora el análisis)."""
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(2, 4, 2, 2)
+        v.setSpacing(5)
+
+        url = self.job.get("url", "")
+        if url:
+            link = QLabel(f'<a href="{url}">{url}</a>')
+            link.setOpenExternalLinks(True)
+            link.setWordWrap(True)
+            link.setStyleSheet("font-size:11px;")
+            v.addWidget(link)
+
+        ayuda = QLabel(
+            "✏️ Edita o pega aquí el texto completo de la vacante (a veces las "
+            "fuentes lo traen recortado). Guarda y vuelve a analizar para una "
+            "evaluación más precisa.")
+        ayuda.setWordWrap(True)
+        ayuda.setStyleSheet("color:#64748b;font-size:11px;")
+        v.addWidget(ayuda)
+
+        self.desc_edit = QTextEdit()
+        self.desc_edit.setAcceptRichText(False)
+        self.desc_edit.setPlainText(self.job.get("description", "") or "")
+        v.addWidget(self.desc_edit, 1)
+
+        fila = QHBoxLayout()
+        fila.addStretch(1)
+        btn_guardar = QPushButton("💾  Guardar contenido")
+        btn_guardar.setStyleSheet(
+            "QPushButton{background:#2563eb;color:white;border:none;font-weight:bold;}"
+            "QPushButton:hover{background:#1d4ed8;}")
+        btn_guardar.clicked.connect(self._guardar_contenido)
+        fila.addWidget(btn_guardar)
+        v.addLayout(fila)
+        return w
+
+    def _guardar_contenido(self) -> None:
+        texto = self.desc_edit.toPlainText().strip()
+        self.db.update_job_description(self.uid, texto)
+        self.job["description"] = texto
+        self.lbl_status.setText("Contenido guardado ✓")
+        # Ofrece reanalizar de inmediato con el texto editado.
+        box = QMessageBox(self)
+        box.setWindowTitle("Contenido guardado")
+        box.setIcon(QMessageBox.Question)
+        box.setText("Se guardó el contenido de la vacante.\n\n"
+                    "¿Quieres reanalizarla ahora con el texto editado?")
+        btn_si = box.addButton("Sí, reanalizar", QMessageBox.YesRole)
+        box.addButton("Ahora no", QMessageBox.NoRole)
+        box.setDefaultButton(btn_si)
+        box.exec()
+        if box.clickedButton() is btn_si:
+            self.tabs.setCurrentIndex(0)
+            self._cargar_evaluacion(force=True, mode=None)
 
     # -- Chip / etiquetas dinámicas -------------------------------------------
 

@@ -255,6 +255,12 @@ class Database:
         )
         return True
 
+    def update_job_description(self, uid: str, description: str) -> None:
+        """Actualiza el texto de la vacante (editado por el usuario para mejor análisis)."""
+        self._execute(
+            "UPDATE jobs SET description = ? WHERE uid = ?", (description, uid)
+        )
+
     def set_quick_classification(self, uid: str, score: int, data: dict[str, Any]) -> None:
         self._execute(
             "UPDATE jobs SET quick_score = ?, classification_json = ? WHERE uid = ?",
