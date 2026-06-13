@@ -69,12 +69,27 @@ bajo demanda, y marcar como aplicada/descartada.
 |-----------|---------|
 | **Python ≥ 3.11** | Probado en 3.12.1 |
 | **OpenCode CLI** | En el PATH (`opencode --version`). Instala desde [opencode.ai](https://opencode.ai) o `npm i -g opencode-ai` |
-| **Windows 10/11** | — |
+| **SO** | Windows 10/11 o **macOS** (también corre en Linux) |
+
+<details open>
+<summary><b>🪟 Windows (PowerShell)</b></summary>
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
+</details>
+
+<details>
+<summary><b>🍎 macOS / 🐧 Linux (bash)</b></summary>
+
+```bash
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+```
+> En macOS, si `python3` no está, instálalo con `brew install python` y Node (para
+> OpenCode) con `brew install node`.
+</details>
 
 ---
 
@@ -144,29 +159,50 @@ La capa de red soporta un **proxy** (p. ej. un VPS para enmascarar IP), integrad
 
 ## ▶️ Ejecutar (desarrollo)
 
+**🪟 Windows (PowerShell):**
 ```powershell
 .\.venv\Scripts\python.exe run_job_radar.py
 ```
 
+**🍎 macOS / 🐧 Linux (bash):**
+```bash
+./.venv/bin/python run_job_radar.py
+# o, tras dar permisos, doble clic / ejecutar el lanzador:
+chmod +x run_job_radar.command && ./run_job_radar.command
+```
+
 > En **Ajustes** hay un *flag de desarrollo* que baja el intervalo del Grupo A a
 > 1 minuto para probar el monitoreo rápido.
+>
+> 📁 La base de datos y tus claves se guardan en `%APPDATA%\JobRadar\` (Windows) o
+> `~/JobRadar/` (macOS / Linux), **fuera** del repositorio.
 
 ---
 
 ## 📦 Generar el ejecutable (PyInstaller)
 
+**🪟 Windows (PowerShell):**
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pyinstaller
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean job_radar.spec
 ```
-
 Resultado: **`dist\Sinfro\Sinfro.exe`** (one-folder, sin consola).
+
+**🍎 macOS (bash):**
+```bash
+./.venv/bin/python -m pip install pyinstaller
+./.venv/bin/python -m PyInstaller --noconfirm --clean job_radar.spec
+```
+Resultado: **`dist/Sinfro/Sinfro`** (ejecútalo con `./dist/Sinfro/Sinfro`).
 
 > **¿Por qué one-folder y no one-file?** Con PySide6, *one-file* re-extrae Qt a un
 > temporal en cada arranque → inicios lentos y falsos positivos de antivirus.
 > *One-folder* arranca rápido y es más estable. La base de datos vive en
-> `%APPDATA%\JobRadar\`, **fuera** del ejecutable, así que actualizar el binario no
-> borra tus datos.
+> `%APPDATA%\JobRadar\` (Windows) o `~/JobRadar/` (macOS), **fuera** del ejecutable,
+> así que actualizar el binario no borra tus datos.
+>
+> 🍎 *Nota macOS:* el ícono `.ico` aplica en Windows; para un ícono nativo en el
+> `.app` de macOS habría que generar un `.icns` (pendiente, no afecta el funcionamiento).
 
 ---
 

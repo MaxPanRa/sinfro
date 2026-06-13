@@ -168,11 +168,11 @@ class JobRow(QWidget):
         f.setBold(True)
 
         if not analizado:
-            # Preliminar (o sin score): gris neutro, % flanqueado por emoji ❓.
-            f.setPointSize(9)
+            # Preliminar (o sin score): gris neutro, % con un ❔ al final.
+            f.setPointSize(10)
             box.setFont(f)
-            pct = f"{score}%" if score is not None else "?"
-            box.setText(f"❓ {pct} ❓")
+            texto = f"{score}% ❔" if score is not None else "❔"
+            box.setText(texto)
             box.setStyleSheet(
                 f"background:{SCORE_PRELIM_BG};color:{SCORE_PRELIM_FG};")
             return box
@@ -314,7 +314,7 @@ class Inbox(QWidget):
         sep = QLabel("│ Caja %:")
         sep.setStyleSheet("color:#9aa5b1;font-size:10px;font-weight:bold;")
         h.addWidget(sep)
-        h.addWidget(chip(SCORE_PRELIM_BG, "❓ preliminar", SCORE_PRELIM_FG))
+        h.addWidget(chip(SCORE_PRELIM_BG, "NN% ❔ preliminar", SCORE_PRELIM_FG))
         h.addWidget(chip(SCORE_VERDE, "cumple"))
         h.addWidget(chip(SCORE_AMARILLO, "-20"))
         h.addWidget(chip(SCORE_NARANJA, "-40"))
