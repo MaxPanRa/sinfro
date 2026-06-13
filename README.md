@@ -196,3 +196,5 @@ es tolerante a códigos ANSI, fences markdown y JSON con llaves sin comillas.
 Funcional de punta a punta: monitoreo, clasificación preliminar local, análisis IA
 (rápido/profundo) con OpenCode, bandeja con estados, fuentes A y B, y empaquetado.
 SerpAPI requiere tu key; OpenCode Go requiere saldo (o usa el modelo gratuito).
+#   s i n f r o  
+ 
