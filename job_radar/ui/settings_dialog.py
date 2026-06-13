@@ -305,14 +305,19 @@ class SettingsDialog(QDialog):
 
         def tarea() -> list[str]:
             jobs = ATSCompanySource(company=company).fetch()
+            # El extra de Jooble es OPCIONAL: si falla (cuota/red/key), no debe
+            # tumbar los resultados de los ATS (Lever/Greenhouse/Workable/Ashby).
             if use_jooble:
-                jobs.extend(JoobleSource(
-                    api_key=key,
-                    keywords=company,
-                    location=service.group_b_location(),
-                    companysearch=True,
-                ).fetch())
-                self.db.increment_quota(service.jooble_period())
+                try:
+                    jobs.extend(JoobleSource(
+                        api_key=key,
+                        keywords=company,
+                        location=service.group_b_location(),
+                        companysearch=True,
+                    ).fetch())
+                    self.db.increment_quota(service.jooble_period())
+                except Exception:  # noqa: BLE001 — Jooble es complemento, no crítico
+                    pass
             return service.ingest_jobs(jobs)
 
         worker = Worker(tarea)

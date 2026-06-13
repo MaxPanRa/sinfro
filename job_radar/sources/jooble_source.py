@@ -8,7 +8,9 @@ from .base import Job, JobSource, clean_html
 class JoobleSource(JobSource):
     name = "Jooble MX"
     group = "B"
-    URL = "https://jooble.org/api/{api_key}"
+    #: IMPORTANTE: la API key de Jooble está atada al subdominio del PAÍS.
+    #: Para México es ``mx.jooble.org`` — usar ``jooble.org`` devuelve 403.
+    URL = "https://{host}/api/{api_key}"
 
     def __init__(
         self,
@@ -16,6 +18,7 @@ class JoobleSource(JobSource):
         keywords: str = "frontend remote",
         location: str = "Mexico",
         *,
+        host: str = "mx.jooble.org",
         companysearch: bool = False,
         page: int = 1,
         result_on_page: int = 25,
@@ -26,6 +29,7 @@ class JoobleSource(JobSource):
         self.api_key = api_key
         self.keywords = keywords
         self.location = location
+        self.host = host
         self.companysearch = companysearch
         self.page = page
         self.result_on_page = result_on_page
@@ -44,7 +48,7 @@ class JoobleSource(JobSource):
         }
         with self._session() as s:
             resp = s.post(
-                self.URL.format(api_key=self.api_key),
+                self.URL.format(host=self.host, api_key=self.api_key),
                 json=payload,
                 timeout=self.timeout,
             )
