@@ -104,30 +104,53 @@ class JobRow(QWidget):
         lbl_meta.setStyleSheet("color:#7f8c8d;font-size:10px;")
         v.addWidget(lbl_meta)
 
-        # Línea de estado/skills + badges sutiles.
-        fila3 = QHBoxLayout()
-        fila3.setSpacing(5)
         resumen = self._summary(job)
         if resumen:
             lbl_summary = QLabel(resumen[:150])
             lbl_summary.setWordWrap(True)
             lbl_summary.setStyleSheet("color:#52606d;font-size:10px;")
-            fila3.addWidget(lbl_summary, 1)
-        else:
-            fila3.addStretch(1)
-        for texto, bg, fg in self._badges(job):
-            b = QLabel(texto)
-            b.setStyleSheet(
-                f"background:{bg};color:{fg};border-radius:5px;"
-                "padding:0px 6px;font-size:9px;font-weight:bold;"
-            )
-            fila3.addWidget(b)
-        v.addLayout(fila3)
+            v.addWidget(lbl_summary)
 
         root.addWidget(izq, 1)
 
+        # --- Columna de badges de estado (3 filas fijas, pegada al %) ---
+        root.addWidget(self._badge_column(job))
+
         # --- Caja de porcentaje (derecha, altura completa) ---
         root.addWidget(self._score_box(job, threshold))
+
+    # -- Columna de badges ----------------------------------------------------
+
+    @staticmethod
+    def _badge_column(job: dict) -> QWidget:
+        """3 filas fijas (Aplicada / Descartada / Visitada), mismo ancho, neutras.
+
+        Cada estado tiene SIEMPRE su propia fila (vacía si no aplica), para que el
+        bloque se vea simétrico aunque no se muestren los tres a la vez.
+        """
+        cont = QWidget()
+        col = QVBoxLayout(cont)
+        col.setContentsMargins(0, 4, 0, 4)
+        col.setSpacing(3)
+        col.addStretch(1)
+        filas = [
+            ("✓ Aplicada", bool(job.get("applied"))),
+            ("✕ Descartada", bool(job.get("discarded"))),
+            ("Visitada", bool(job.get("visited_site"))),
+        ]
+        for texto, activo in filas:
+            slot = QLabel(texto if activo else "")
+            slot.setFixedSize(92, 20)
+            slot.setAlignment(Qt.AlignCenter)
+            if activo:
+                slot.setStyleSheet(
+                    "background:#ffffff;color:#1f2933;border:1px solid #d0d7de;"
+                    "border-radius:5px;font-size:10px;font-weight:bold;")
+            else:
+                slot.setStyleSheet("background:transparent;border:none;")
+            col.addWidget(slot, 0, Qt.AlignRight)
+        col.addStretch(1)
+        return cont
 
     # -- Caja de porcentaje ---------------------------------------------------
 
@@ -139,30 +162,28 @@ class JobRow(QWidget):
 
         box = QLabel()
         box.setAlignment(Qt.AlignCenter)
-        box.setFixedWidth(58)
+        box.setFixedWidth(60)
         box.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         f = QFont()
         f.setBold(True)
-        f.setPointSize(11)
-        box.setFont(f)
 
-        if score is None:
-            box.setText("¿\n?\n?")
+        if not analizado:
+            # Preliminar (o sin score): gris neutro, % flanqueado por emoji ❓.
+            f.setPointSize(9)
+            box.setFont(f)
+            pct = f"{score}%" if score is not None else "?"
+            box.setText(f"❓ {pct} ❓")
             box.setStyleSheet(
                 f"background:{SCORE_PRELIM_BG};color:{SCORE_PRELIM_FG};")
             return box
 
-        if analizado:
-            # Analizado por IA: caja sólida coloreada según umbral.
-            color = score_color(int(score), threshold)
-            fg = "#3f3f00" if color == SCORE_AMARILLO else "white"
-            box.setText(f"{score}%")
-            box.setStyleSheet(f"background:{color};color:{fg};")
-        else:
-            # Preliminar (precalculado): gris con signos de interrogación.
-            box.setText(f"¿\n{score}%\n?")
-            box.setStyleSheet(
-                f"background:{SCORE_PRELIM_BG};color:{SCORE_PRELIM_FG};")
+        # Analizado por IA: caja sólida coloreada según umbral.
+        f.setPointSize(12)
+        box.setFont(f)
+        color = score_color(int(score), threshold)
+        fg = "#3f3f00" if color == SCORE_AMARILLO else "white"
+        box.setText(f"{score}%")
+        box.setStyleSheet(f"background:{color};color:{fg};")
         return box
 
     # -- Estilos / helpers ----------------------------------------------------
@@ -195,17 +216,6 @@ class JobRow(QWidget):
         resumen = str(data.get("resumen_una_linea", "")).strip()
         # Quita el prefijo redundante "COMP PRELIM NN% -" / "COMP IA NN% -".
         return _COMP_PREFIX_RE.sub("", resumen).strip()
-
-    @staticmethod
-    def _badges(job: dict) -> list[tuple[str, str, str]]:
-        out: list[tuple[str, str, str]] = []
-        if job.get("applied"):
-            out.append(("✓ Aplicada", BORDE_VERDE, "white"))
-        if job.get("discarded"):
-            out.append(("✕ Descartada", BORDE_ROJO, "white"))
-        if job.get("visited_site") and not job.get("applied"):
-            out.append(("Visitada", "#b7791f", "white"))
-        return out
 
     @staticmethod
     def _classification(job: dict) -> dict:
@@ -304,7 +314,7 @@ class Inbox(QWidget):
         sep = QLabel("│ Caja %:")
         sep.setStyleSheet("color:#9aa5b1;font-size:10px;font-weight:bold;")
         h.addWidget(sep)
-        h.addWidget(chip(SCORE_PRELIM_BG, "¿?=preliminar", SCORE_PRELIM_FG))
+        h.addWidget(chip(SCORE_PRELIM_BG, "❓ preliminar", SCORE_PRELIM_FG))
         h.addWidget(chip(SCORE_VERDE, "cumple"))
         h.addWidget(chip(SCORE_AMARILLO, "-20"))
         h.addWidget(chip(SCORE_NARANJA, "-40"))
