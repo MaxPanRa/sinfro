@@ -160,7 +160,7 @@ La capa de red soporta un **proxy** (p. ej. un VPS para enmascarar IP), integrad
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean job_radar.spec
 ```
 
-Resultado: **`dist\JobRadar\JobRadar.exe`** (one-folder, sin consola).
+Resultado: **`dist\Sinfro\Sinfro.exe`** (one-folder, sin consola).
 
 > **¿Por qué one-folder y no one-file?** Con PySide6, *one-file* re-extrae Qt a un
 > temporal en cada arranque → inicios lentos y falsos positivos de antivirus.

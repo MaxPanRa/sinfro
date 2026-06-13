@@ -15,6 +15,12 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 datas, binaries, hiddenimports = [], [], []
 
+# Recursos (ícono) empacados en la misma ruta relativa que en dev.
+datas += [
+    ("job_radar/assets/icon.ico", "job_radar/assets"),
+    ("job_radar/assets/icon.png", "job_radar/assets"),
+]
+
 # jobspy se importa de forma diferida dentro de la fuente → recolectar todo.
 for paquete in ("jobspy", "pdfplumber", "pdfminer", "feedparser", "docx", "pypdf"):
     try:
@@ -52,7 +58,8 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="JobRadar",
+    name="Sinfro",
+    icon="job_radar/assets/icon.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -72,5 +79,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="JobRadar",
+    name="Sinfro",
 )

@@ -7,16 +7,19 @@ from __future__ import annotations
 
 import sys
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from . import __app_name__
-from .config import DB_PATH
+from .config import DB_PATH, ICON_PATH
 from .db.database import Database
 
 
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(__app_name__)
+    if ICON_PATH.exists():
+        app.setWindowIcon(QIcon(str(ICON_PATH)))
 
     # Tema visual global (QSS).
     from .ui.style import apply_theme

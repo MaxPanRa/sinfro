@@ -1,4 +1,4 @@
-"""Job Radar — monitor de vacantes de empleo con clasificación y evaluación por IA."""
+"""Sinfro (Sin Fronteras) — monitor de vacantes de empleo sin fronteras con IA."""
 
 __version__ = "0.1.0"
-__app_name__ = "Job Radar"
+__app_name__ = "Sinfro"

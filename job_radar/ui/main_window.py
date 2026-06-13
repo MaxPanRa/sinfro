@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QThreadPool, Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QMainWindow, QMessageBox, QSplitter, QWidget,
 )
 
 from .. import __app_name__, __version__
+from ..config import ICON_PATH
 from ..db.database import Database
 from ..service import AppService
 from ..sources import GROUP_A_SOURCES
@@ -33,6 +34,8 @@ class MainWindow(QMainWindow):
         self._monitoring_active = False
 
         self.setWindowTitle(f"{__app_name__} v{__version__}")
+        if ICON_PATH.exists():
+            self.setWindowIcon(QIcon(str(ICON_PATH)))
         self.resize(1180, 760)
         self._build_menu()
         self._build_body()

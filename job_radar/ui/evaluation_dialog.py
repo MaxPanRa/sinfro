@@ -122,8 +122,11 @@ class EvaluationDialog(QDialog):
         btn_copiar.clicked.connect(self._copiar_url)
         self.btn_descartar = QPushButton("🗑  Descartar")
         self.btn_descartar.clicked.connect(self._descartar)
+        self.btn_cerrar = QPushButton("✕  Cerrar")
+        self.btn_cerrar.setToolTip("Cierra sin descartar; solo marca como vista.")
+        self.btn_cerrar.clicked.connect(self._cerrar)
         for b in (self.btn_aplicar, self.btn_analizar, btn_ir, btn_copiar,
-                  self.btn_descartar):
+                  self.btn_descartar, self.btn_cerrar):
             botones.addWidget(b)
         return botones
 
@@ -281,5 +284,11 @@ class EvaluationDialog(QDialog):
 
     def _descartar(self) -> None:
         self.db.mark_discarded(self.uid)
+        self.estado_cambiado.emit()
+        self.accept()
+
+    def _cerrar(self) -> None:
+        # Cierra sin descartar; solo asegura el estado "vista".
+        self.db.mark_seen(self.uid)
         self.estado_cambiado.emit()
         self.accept()

@@ -169,16 +169,22 @@ class JobRow(QWidget):
 
     @staticmethod
     def _row_style(job: dict, threshold: int) -> str:
-        """Fondo de la fila: SIEMPRE uno de los 3 tonos claros (verde/amarillo/rojo).
+        """Fondo de la fila según estado/compatibilidad.
 
-        Aplicada → verde, Descartada → rojo (mandan). El resto se colorea por
-        compatibilidad en 3 niveles.
+        Aplicada → verde, Descartada → rojo (mandan). Las **analizadas** se colorean
+        por compatibilidad en 3 niveles (verde/amarillo/rojo). Las que siguen
+        **preliminares** (sin análisis IA) quedan SIN color (neutras).
         """
         base = "#JobRow{{background:{bg};border-left:4px solid {borde};}}"
         if job.get("applied"):
             return base.format(bg=ROW_BG_VERDE, borde=BORDE_VERDE)
         if job.get("discarded"):
             return base.format(bg=ROW_BG_ROJO, borde=BORDE_ROJO)
+        data = JobRow._classification(job)
+        analizado = str(data.get("source", "")).startswith("ai_")
+        if not analizado:
+            # Preliminar: sin color seleccionado (neutra) hasta que se analice.
+            return "#JobRow{background:#ffffff;border-left:4px solid #e2e8f0;}"
         score = job.get("quick_score")
         bg, borde = row_bg_3(int(score) if score is not None else None, threshold)
         return base.format(bg=bg, borde=borde)

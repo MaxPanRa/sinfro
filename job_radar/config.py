@@ -18,6 +18,10 @@ APP_DIR.mkdir(parents=True, exist_ok=True)
 #: Ruta del archivo SQLite con toda la persistencia.
 DB_PATH: Path = APP_DIR / "job_radar.db"
 
+#: Recursos empaquetados (ícono). Resuelve en dev y bajo PyInstaller (datas).
+ASSETS_DIR: Path = Path(__file__).resolve().parent / "assets"
+ICON_PATH: Path = ASSETS_DIR / "icon.ico"
+
 # --- Modelos de IA (defaults; configurables en Ajustes) ----------------------
 # OJO: el formato real del CLI es `opencode-go/<id>` para la suscripción Go
 # y `opencode/<id>-free` para los gratuitos.
