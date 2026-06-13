@@ -18,13 +18,15 @@ from ..service import AppService
 FILTROS = [("Todas", "todas"), ("No vistas", "no_vistas"),
            ("Aplicadas", "aplicadas"), ("Descartadas", "descartadas")]
 
-# --- Paleta de estados (fondo de la fila) ------------------------------------
-COLOR_APLICADA_BG = "#d7f3df"      # verde claro: aplicada
-COLOR_APLICADA_BORDE = "#27ae60"
-COLOR_DESCARTADA_BG = "#fcdcdc"    # rojo claro: descartada (sigue visible)
-COLOR_DESCARTADA_BORDE = "#c0392b"
-COLOR_VISTA_BG = "#fdf3c7"         # amarillo claro: vista / analizada
-COLOR_VISTA_BORDE = "#f1c40f"
+# --- Paleta de FONDO de la fila: SOLO 3 tonos claros -------------------------
+# Toda vacante tiene fondo verde/amarillo/rojo claro según su compatibilidad,
+# con aplicada=verde y descartada=rojo como estados que mandan.
+ROW_BG_VERDE = "#d6f0dd"           # verde claro: compatible / aplicada
+ROW_BG_AMARILLO = "#fbf1c2"        # amarillo claro: compatibilidad media
+ROW_BG_ROJO = "#f9d6d3"            # rojo claro: baja compatibilidad / descartada
+BORDE_VERDE = "#27ae60"
+BORDE_AMARILLO = "#eab308"
+BORDE_ROJO = "#c0392b"
 
 # --- Paleta de la caja de porcentaje -----------------------------------------
 SCORE_VERDE = "#16a34a"
@@ -34,15 +36,19 @@ SCORE_ROJO = "#dc2626"
 SCORE_PRELIM_BG = "#e5e7eb"        # gris claro: preliminar
 SCORE_PRELIM_FG = "#4b5563"        # gris oscuro
 
-# --- Tinte CLARO del fondo de la fila según compatibilidad (no vistas) --------
-ROW_TINT = {
-    SCORE_VERDE: "#e7f6ec",        # compatible
-    SCORE_AMARILLO: "#fcf6d8",     # -20
-    SCORE_NARANJA: "#fdeede",      # -40
-    SCORE_ROJO: "#fbe4e2",         # bajo
-}
-ROW_TINT_PRELIM = "#f3f4f6"        # gris muy claro: preliminar sin analizar
-ROW_BORDE_PRELIM = "#cbd2d9"
+def row_bg_3(score: int | None, threshold: int) -> tuple[str, str]:
+    """Fondo (verde/amarillo/rojo claro) y borde según compatibilidad, en 3 niveles.
+
+    >= umbral → verde; hasta 20 pts por debajo → amarillo; el resto → rojo.
+    Sin score (no debería ocurrir) → amarillo neutro.
+    """
+    if score is None:
+        return ROW_BG_AMARILLO, BORDE_AMARILLO
+    if score >= threshold:
+        return ROW_BG_VERDE, BORDE_VERDE
+    if score >= threshold - 20:
+        return ROW_BG_AMARILLO, BORDE_AMARILLO
+    return ROW_BG_ROJO, BORDE_ROJO
 
 _COMP_PREFIX_RE = re.compile(r"^\s*COMP\s+(?:PRELIM|IA)\s+\d+%\s*-?\s*", re.IGNORECASE)
 
@@ -159,25 +165,19 @@ class JobRow(QWidget):
 
     @staticmethod
     def _row_style(job: dict, threshold: int) -> str:
-        """Fondo de la fila según su estado/compatibilidad.
+        """Fondo de la fila: SIEMPRE uno de los 3 tonos claros (verde/amarillo/rojo).
 
-        Estados explícitos mandan (aplicada=verde, descartada=rojo, vista=amarillo).
-        Las NO vistas se tintan con un tono claro según su compatibilidad (heatmap):
-        verde/amarillo/naranja/rojo, o gris si aún es preliminar (sin analizar).
+        Aplicada → verde, Descartada → rojo (mandan). El resto se colorea por
+        compatibilidad en 3 niveles.
         """
         base = "#JobRow{{background:{bg};border-left:4px solid {borde};}}"
         if job.get("applied"):
-            return base.format(bg=COLOR_APLICADA_BG, borde=COLOR_APLICADA_BORDE)
+            return base.format(bg=ROW_BG_VERDE, borde=BORDE_VERDE)
         if job.get("discarded"):
-            return base.format(bg=COLOR_DESCARTADA_BG, borde=COLOR_DESCARTADA_BORDE)
-        if job.get("seen"):
-            return base.format(bg=COLOR_VISTA_BG, borde=COLOR_VISTA_BORDE)
-        # No vista → tinte por compatibilidad.
+            return base.format(bg=ROW_BG_ROJO, borde=BORDE_ROJO)
         score = job.get("quick_score")
-        if score is None:
-            return base.format(bg=ROW_TINT_PRELIM, borde=ROW_BORDE_PRELIM)
-        color = score_color(int(score), threshold)
-        return base.format(bg=ROW_TINT.get(color, "#ffffff"), borde=color)
+        bg, borde = row_bg_3(int(score) if score is not None else None, threshold)
+        return base.format(bg=bg, borde=borde)
 
     @staticmethod
     def _summary(job: dict) -> str:
@@ -190,9 +190,9 @@ class JobRow(QWidget):
     def _badges(job: dict) -> list[tuple[str, str, str]]:
         out: list[tuple[str, str, str]] = []
         if job.get("applied"):
-            out.append(("✓ Aplicada", COLOR_APLICADA_BORDE, "white"))
+            out.append(("✓ Aplicada", BORDE_VERDE, "white"))
         if job.get("discarded"):
-            out.append(("✕ Descartada", COLOR_DESCARTADA_BORDE, "white"))
+            out.append(("✕ Descartada", BORDE_ROJO, "white"))
         if job.get("visited_site") and not job.get("applied"):
             out.append(("Visitada", "#b7791f", "white"))
         return out
@@ -288,10 +288,10 @@ class Inbox(QWidget):
         leyenda = QLabel("Fila:")
         leyenda.setStyleSheet("color:#52606d;font-size:10px;font-weight:bold;")
         h.addWidget(leyenda)
-        h.addWidget(chip(COLOR_APLICADA_BG, "Aplicada"))
-        h.addWidget(chip(COLOR_VISTA_BG, "Vista"))
-        h.addWidget(chip(COLOR_DESCARTADA_BG, "Descartada"))
-        sep = QLabel("│ No vista (tinte) y %:")
+        h.addWidget(chip(ROW_BG_VERDE, "compatible/aplicada"))
+        h.addWidget(chip(ROW_BG_AMARILLO, "media"))
+        h.addWidget(chip(ROW_BG_ROJO, "baja/descartada"))
+        sep = QLabel("│ Caja %:")
         sep.setStyleSheet("color:#9aa5b1;font-size:10px;font-weight:bold;")
         h.addWidget(sep)
         h.addWidget(chip(SCORE_PRELIM_BG, "¿?=preliminar", SCORE_PRELIM_FG))
