@@ -27,8 +27,10 @@ class MainWindow(QMainWindow):
         self.db = db
         self.service = AppService(db)
         self.pool = QThreadPool.globalInstance()
+        self.manual_ai_pool = QThreadPool()
+        self.manual_ai_pool.setMaxThreadCount(1)
         self._scheduler = None  # se inyecta en Fase 5
-        self._clasificando = 0
+        self._monitoring_active = False
 
         self.setWindowTitle(f"{__app_name__} v{__version__}")
         self.resize(1180, 760)
@@ -52,8 +54,8 @@ class MainWindow(QMainWindow):
 
     def _build_body(self) -> None:
         splitter = QSplitter(Qt.Horizontal)
-        self.left = LeftPanel(self.db, self.service, self.pool)
-        self.inbox = Inbox(self.db)
+        self.left = LeftPanel(self.db, self.service, self.pool, self.manual_ai_pool)
+        self.inbox = Inbox(self.db, self.service)
         splitter.addWidget(self.left)
         splitter.addWidget(self.inbox)
         splitter.setStretchFactor(0, 0)
@@ -75,13 +77,19 @@ class MainWindow(QMainWindow):
     def _abrir_ajustes(self) -> None:
         dlg = SettingsDialog(self.db, self.service, self.pool, self)
         dlg.vacantes_nuevas.connect(self._tras_busqueda_manual)
+        dlg.datos_limpiados.connect(self._tras_limpiar_datos)
         dlg.exec()
 
     def _tras_busqueda_manual(self, nuevos: list) -> None:
         """Refresca la bandeja y clasifica las vacantes de una búsqueda manual."""
         self.inbox.refresh()
-        for uid in nuevos:
-            self._encolar_clasificacion(uid)
+        self.statusBar().showMessage(
+            f"Busqueda manual: {len(nuevos)} vacantes nuevas con compatibilidad preliminar."
+        )
+
+    def _tras_limpiar_datos(self) -> None:
+        self.inbox.refresh()
+        self.statusBar().showMessage("Bandeja e historial limpiados.")
 
     def _about(self) -> None:
         QMessageBox.information(
@@ -91,13 +99,14 @@ class MainWindow(QMainWindow):
         )
 
     def _abrir_evaluacion(self, uid: str) -> None:
-        dlg = EvaluationDialog(self.db, self.service, self.pool, uid, self)
+        dlg = EvaluationDialog(self.db, self.service, self.manual_ai_pool, uid, self)
         dlg.estado_cambiado.connect(self.inbox.refresh)
         dlg.exec()
 
     # -- Monitoreo (corrida inmediata; scheduler recurrente en Fase 5) --------
 
     def _on_monitoring(self, activo: bool) -> None:
+        self._monitoring_active = activo
         if self._scheduler is not None:
             # Si el scheduler de Fase 5 está presente, delega en él.
             self._scheduler.set_active(activo)
@@ -141,9 +150,10 @@ class MainWindow(QMainWindow):
             msg += f"  Fuentes con fallo: {', '.join(fallos)}"
         self.statusBar().showMessage(msg)
         self.left.set_estado(msg)
+        if not self._monitoring_active:
+            return
         # Encola la clasificación rápida de las nuevas.
-        for uid in nuevos:
-            self._encolar_clasificacion(uid)
+        self.inbox.refresh()
 
     def run_group_b(self, day_key: str) -> None:
         """Corrida del Grupo B (JobSpy + SerpAPI). Registra la corrida en ``runs``.
@@ -155,6 +165,8 @@ class MainWindow(QMainWindow):
         proxies = self.service.proxies()
         query = self.service.build_group_b_query()
         location = self.service.group_b_location()
+        serpapi_query = self.service.build_serpapi_query()
+        serpapi_location = self.service.serpapi_location()
         serpapi_key = self.db.get_setting("serpapi_key", "")
         serp_disponible = bool(serpapi_key) and self.service.serpapi_remaining() > 0
         run_id = self.db.start_run("B", day_key)
@@ -177,7 +189,11 @@ class MainWindow(QMainWindow):
             # SerpAPI (si hay key y cuota).
             if serp_disponible:
                 try:
-                    sp = SerpApiSource(api_key=serpapi_key, query=query, location=location)
+                    sp = SerpApiSource(
+                        api_key=serpapi_key,
+                        query=serpapi_query,
+                        location=serpapi_location,
+                    )
                     nuevos.extend(self.service.ingest_jobs(sp.fetch()))
                     self.db.increment_quota(self.service.serpapi_period())
                 except Exception as exc:  # noqa: BLE001
@@ -204,14 +220,32 @@ class MainWindow(QMainWindow):
             msg += f"  Fallos: {', '.join(fallos)}"
         self.statusBar().showMessage(msg)
         self.left.set_estado(msg)
-        for uid in nuevos:
-            self._encolar_clasificacion(uid)
+        if not self._monitoring_active:
+            return
+        self.inbox.refresh()
 
-    def _encolar_clasificacion(self, uid: str) -> None:
+    def _encolar_clasificaciones(self, uids: list[str], *, require_monitoring: bool) -> None:
+        return
+        for uid in uids[:MAX_AUTO_CLASSIFICATIONS]:
+            self._encolar_clasificacion(uid, require_monitoring=require_monitoring)
+        restantes = max(0, len(uids) - MAX_AUTO_CLASSIFICATIONS)
+        if restantes:
+            self.statusBar().showMessage(
+                f"Clasificando {MAX_AUTO_CLASSIFICATIONS} vacantes; "
+                f"{restantes} quedan sin IA para evitar saturar OpenCode."
+            )
+
+    def _encolar_clasificacion(self, uid: str, *, require_monitoring: bool) -> None:
+        return
         client = self.service.build_client()
+        epoch = self._classification_epoch
         self._clasificando += 1
 
         def tarea() -> str:
+            if require_monitoring and (
+                not self._monitoring_active or epoch != self._classification_epoch
+            ):
+                return uid
             self.service.classify_uid(client, uid)
             return uid
 
@@ -221,7 +255,7 @@ class MainWindow(QMainWindow):
             lambda m: self.statusBar().showMessage(f"Clasificación falló: {m}")
         )
         worker.signals.finished.connect(self._fin_clasificacion)
-        self.pool.start(worker)
+        self.classification_pool.start(worker)
 
     def _fin_clasificacion(self) -> None:
         self._clasificando = max(0, self._clasificando - 1)
@@ -234,5 +268,6 @@ class MainWindow(QMainWindow):
         if self._scheduler is not None:
             self._scheduler.stop()
         self.pool.clear()
+        self.manual_ai_pool.clear()
         self.db.close()
         super().closeEvent(event)

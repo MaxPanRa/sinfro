@@ -48,6 +48,7 @@ PLANTILLA = """\
 ## Calificación Final
 - Empresa: /10 — Salario: /10 — Modalidad: /10 — Tecnologías: /10 — Crecimiento: /10 — Compatibilidad: /10
 ### Score Total: X.X / 10
+### Compatibilidad IA: X%
 ### Recomendación Final
 Resumen breve y directo sobre si vale la pena invertir tiempo en el proceso.
 """
@@ -82,6 +83,49 @@ Descripción completa:
 """
 
 
+_FAST_PROMPT = """\
+Eres un asesor tecnico de carrera. Evalua rapido esta vacante para decidir si
+vale la pena invertir tiempo. Se objetivo, no infles el match y responde SOLO
+Markdown.
+
+Incluye exactamente estas secciones:
+# Evaluacion rapida de Vacante
+## Resumen
+- Puesto:
+- Empresa:
+- Modalidad:
+- Ubicacion:
+- Compatibilidad general:
+## Match con Mi Perfil
+- Fortalezas:
+- Brechas:
+- Restricciones geograficas:
+## Veredicto
+- Aplicar: Si / Si con reservas / No
+- Razones:
+## Calificacion Final
+### Score Total: X.X / 10
+### Compatibilidad IA: X%
+### Recomendacion Final
+
+=== PERFIL DEL USUARIO ===
+{perfil}
+Nivel de ingles: {ingles}
+Objetivo salarial: {salario}
+Tecnologias y niveles:
+{tecnologias}
+
+=== VACANTE ===
+Titulo: {title}
+Empresa: {company}
+Ubicacion: {location}
+Fuente: {source}
+URL: {url}
+Descripcion:
+{description}
+"""
+
+
 def _format_techs(techs: list[dict[str, Any]]) -> str:
     if not techs:
         return "(sin tecnologías declaradas)"
@@ -109,8 +153,33 @@ def build_eval_prompt(
         location=job.get("location", ""),
         source=job.get("source", ""),
         url=job.get("url", ""),
-        description=(job.get("description", "") or "")[:8000],
+        description=(job.get("description", "") or "")[:3500],
         plantilla=PLANTILLA,
+    )
+
+
+def build_fast_eval_prompt(
+    job: dict[str, Any],
+    *,
+    profile_summary: str,
+    technologies: list[dict[str, Any]],
+    nivel_ingles: str,
+    salario_objetivo: str,
+) -> str:
+    """Construye un prompt compacto para evaluacion bajo demanda rapida."""
+    perfil = (profile_summary or "").strip()
+    perfil = f"{PERFIL_BASE}\n{perfil}" if perfil else PERFIL_BASE
+    return _FAST_PROMPT.format(
+        perfil=perfil,
+        ingles=nivel_ingles or "B2",
+        salario=salario_objetivo or "25 USD/hora",
+        tecnologias=_format_techs(technologies),
+        title=job.get("title", ""),
+        company=job.get("company", ""),
+        location=job.get("location", ""),
+        source=job.get("source", ""),
+        url=job.get("url", ""),
+        description=(job.get("description", "") or "")[:1800],
     )
 
 
@@ -122,17 +191,28 @@ def evaluate_job(
     technologies: list[dict[str, Any]],
     nivel_ingles: str,
     salario_objetivo: str,
+    mode: str = "profunda",
     timeout: int = 180,
 ) -> str:
     """Genera la evaluación profunda en Markdown. Devuelve el texto listo para cachear."""
-    prompt = build_eval_prompt(
-        job,
-        profile_summary=profile_summary,
-        technologies=technologies,
-        nivel_ingles=nivel_ingles,
-        salario_objetivo=salario_objetivo,
-    )
-    raw = client.run_deep(prompt, timeout=timeout)
+    if mode == "rapida":
+        prompt = build_fast_eval_prompt(
+            job,
+            profile_summary=profile_summary,
+            technologies=technologies,
+            nivel_ingles=nivel_ingles,
+            salario_objetivo=salario_objetivo,
+        )
+        raw = client.run_fast(prompt, timeout=timeout)
+    else:
+        prompt = build_eval_prompt(
+            job,
+            profile_summary=profile_summary,
+            technologies=technologies,
+            nivel_ingles=nivel_ingles,
+            salario_objetivo=salario_objetivo,
+        )
+        raw = client.run_deep(prompt, timeout=timeout)
     markdown = clean_cli_output(raw)
     # Si el modelo envolvió en fences, quítalos conservando el contenido.
     if markdown.startswith("```"):

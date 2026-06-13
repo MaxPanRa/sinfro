@@ -18,6 +18,10 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(__app_name__)
 
+    # Tema visual global (QSS).
+    from .ui.style import apply_theme
+    apply_theme(app)
+
     db = Database(DB_PATH)
 
     # Import diferido para que la app falle limpio si falta una dependencia de UI.

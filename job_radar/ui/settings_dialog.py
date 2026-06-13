@@ -24,6 +24,7 @@ class SettingsDialog(QDialog):
 
     #: Emitida tras una búsqueda manual de SerpAPI con los uids nuevos ingeridos.
     vacantes_nuevas = Signal(list)
+    datos_limpiados = Signal()
 
     def __init__(self, db: Database, service=None, pool: QThreadPool | None = None,
                  parent: QWidget | None = None) -> None:
@@ -48,11 +49,15 @@ class SettingsDialog(QDialog):
         self.api_key.setPlaceholderText("Se inyecta como OPENCODE_API_KEY (no se loguea)")
         self.fast_model = QLineEdit()
         self.deep_model = QLineEdit()
+        self.evaluation_mode = QComboBox()
+        self.evaluation_mode.addItem("Rapida (modelo flash)", "rapida")
+        self.evaluation_mode.addItem("Profunda (modelo completo)", "profunda")
         self.use_free = QCheckBox("Usar modelo gratuito de respaldo si se agota el saldo")
         self.free_model = QLineEdit()
         f_ia.addRow("API key de OpenCode Go:", self.api_key)
         f_ia.addRow("Modelo clasificación rápida:", self.fast_model)
         f_ia.addRow("Modelo evaluación profunda:", self.deep_model)
+        f_ia.addRow("Modo al abrir vacante:", self.evaluation_mode)
         f_ia.addRow("", self.use_free)
         f_ia.addRow("Modelo gratuito (respaldo):", self.free_model)
         root.addWidget(grp_ia)
@@ -70,6 +75,12 @@ class SettingsDialog(QDialog):
         self.btn_buscar_ahora = QPushButton("Buscar ahora")
         self.btn_buscar_ahora.clicked.connect(self._buscar_ahora)
         f_src.addRow("", self.btn_buscar_ahora)
+        self.group_b_hour = QComboBox()
+        for h in range(12):
+            am = 12 if h == 0 else h
+            pm = 12 if h == 0 else h
+            self.group_b_hour.addItem(f"{am}:00 AM / {pm}:00 PM", str(h))
+        f_src.addRow("Búsqueda automática cada 12 h:", self.group_b_hour)
         self.proxy_enabled = QCheckBox("Activar proxy VPS (para enmascarar IP)")
         self.proxy_host = QLineEdit()
         self.proxy_host.setPlaceholderText("host:puerto (ej. 1.2.3.4:8080)")
@@ -112,6 +123,18 @@ class SettingsDialog(QDialog):
         f_dev.addRow("", self.dev_fast)
         root.addWidget(grp_dev)
 
+        grp_mant = QGroupBox("Mantenimiento")
+        v_mant = QVBoxLayout(grp_mant)
+        self.btn_limpiar_datos = QPushButton("Limpiar bandeja e historial de busqueda")
+        self.btn_limpiar_datos.setStyleSheet(
+            "QPushButton{background:#c0392b;color:white;font-weight:bold;"
+            "border-radius:6px;padding:7px 10px;}"
+            "QPushButton:hover{background:#e74c3c;}"
+        )
+        self.btn_limpiar_datos.clicked.connect(self._limpiar_datos)
+        v_mant.addWidget(self.btn_limpiar_datos)
+        root.addWidget(grp_mant)
+
         botones = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         botones.accepted.connect(self._save_and_accept)
         botones.rejected.connect(self.reject)
@@ -122,9 +145,13 @@ class SettingsDialog(QDialog):
         self.api_key.setText(s.get("opencode_api_key", ""))
         self.fast_model.setText(s.get("fast_model", ""))
         self.deep_model.setText(s.get("deep_model", ""))
+        idx_mode = self.evaluation_mode.findData(s.get("evaluation_mode", "rapida"))
+        self.evaluation_mode.setCurrentIndex(max(0, idx_mode))
         self.use_free.setChecked(s.get("use_free_fallback", "0") == "1")
         self.free_model.setText(s.get("free_model", ""))
         self.serpapi_key.setText(s.get("serpapi_key", ""))
+        idx_hour = self.group_b_hour.findData(s.get("group_b_hour", "6"))
+        self.group_b_hour.setCurrentIndex(max(0, idx_hour))
         self.proxy_enabled.setChecked(s.get("proxy_enabled", "0") == "1")
         self.proxy_host.setText(s.get("proxy_host", ""))
         idx = self.nivel_ingles.findText(s.get("nivel_ingles", "B2"))
@@ -171,8 +198,8 @@ class SettingsDialog(QDialog):
 
         from ..sources import SerpApiSource
         service = self.service
-        query = service.build_group_b_query()
-        location = service.group_b_location()
+        query = service.build_serpapi_query()
+        location = service.serpapi_location()
         self.btn_buscar_ahora.setEnabled(False)
         self.btn_buscar_ahora.setText("Buscando en Google…")
 
@@ -201,11 +228,32 @@ class SettingsDialog(QDialog):
         self._update_serp_quota()
         QMessageBox.warning(self, "Error en SerpAPI", msg)
 
+    def _limpiar_datos(self) -> None:
+        ok = QMessageBox.question(
+            self,
+            "Limpiar bandeja",
+            "Esto borrara todas las vacantes, evaluaciones cacheadas e historial "
+            "de busquedas. Tus ajustes, keywords, tecnologias y perfil se conservan.\n\n"
+            "Continuar?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if ok != QMessageBox.Yes:
+            return
+        self.db.clear_jobs_and_search_history()
+        self.datos_limpiados.emit()
+        QMessageBox.information(
+            self,
+            "Datos limpiados",
+            "La bandeja y el historial de busqueda quedaron vacios.",
+        )
+
     def _save_and_accept(self) -> None:
         pares = {
             "opencode_api_key": self.api_key.text().strip(),
             "fast_model": self.fast_model.text().strip(),
             "deep_model": self.deep_model.text().strip(),
+            "evaluation_mode": str(self.evaluation_mode.currentData()),
             "use_free_fallback": "1" if self.use_free.isChecked() else "0",
             "free_model": self.free_model.text().strip(),
             "serpapi_key": self.serpapi_key.text().strip(),
@@ -216,6 +264,7 @@ class SettingsDialog(QDialog):
             "salario_moneda": self.salario_moneda.currentText(),
             "salario_periodo": self.salario_periodo.currentText(),
             "match_threshold": str(self.match_threshold.value()),
+            "group_b_hour": str(self.group_b_hour.currentData()),
             "dev_fast_scheduler": "1" if self.dev_fast.isChecked() else "0",
         }
         for k, v in pares.items():

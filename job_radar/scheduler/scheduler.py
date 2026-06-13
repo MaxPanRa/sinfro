@@ -12,7 +12,7 @@ from datetime import datetime
 
 from PySide6.QtCore import QObject, QTimer
 
-from ..config import GROUP_A_INTERVAL_MIN, GROUP_B_WINDOWS
+from ..config import GROUP_A_INTERVAL_MIN
 
 
 class Scheduler(QObject):
@@ -63,20 +63,35 @@ class Scheduler(QObject):
         if not self._active:
             return
         ahora = datetime.now()
-        if not self._en_ventana_b(ahora):
+        day_key = self._group_b_day_key(ahora)
+        if not day_key:
             return
-        day_key = ahora.strftime("%Y-%m-%d")
         if self.db.group_b_ran_today(day_key):
             return
         # Ejecuta Grupo B si la ventana lo implementa (Fase 6).
         if hasattr(self.window, "run_group_b"):
             self.window.run_group_b(day_key)
 
+    def _group_b_start_hour(self) -> int:
+        try:
+            return int(self.db.get_setting("group_b_hour", "6")) % 12
+        except ValueError:
+            return 6
+
+    def _group_b_day_key(self, ahora: datetime) -> str | None:
+        hour = self._matching_group_b_hour(ahora, self._group_b_start_hour())
+        if hour is None:
+            return None
+        return f"{ahora:%Y-%m-%d}:{hour:02d}"
+
     @staticmethod
-    def _en_ventana_b(ahora: datetime) -> bool:
-        for h1, m1, h2, m2 in GROUP_B_WINDOWS:
-            inicio = ahora.replace(hour=h1, minute=m1, second=0, microsecond=0)
-            fin = ahora.replace(hour=h2, minute=m2, second=59, microsecond=0)
-            if inicio <= ahora <= fin:
-                return True
-        return False
+    def _matching_group_b_hour(ahora: datetime, start_hour: int = 6) -> int | None:
+        start_hour = start_hour % 12
+        for hour in (start_hour, start_hour + 12):
+            if ahora.hour == hour and 0 <= ahora.minute <= 5:
+                return hour
+        return None
+
+    @staticmethod
+    def _en_ventana_b(ahora: datetime, start_hour: int = 6) -> bool:
+        return Scheduler._matching_group_b_hour(ahora, start_hour) is not None

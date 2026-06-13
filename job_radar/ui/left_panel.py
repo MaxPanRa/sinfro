@@ -26,11 +26,13 @@ class LeftPanel(QWidget):
     filtros_cambiados = Signal()
 
     def __init__(self, db: Database, service: AppService, pool: QThreadPool,
+                 ai_pool: QThreadPool | None = None,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.db = db
         self.service = service
         self.pool = pool
+        self.ai_pool = ai_pool or pool
         self._monitoring = False
         self._build()
         self._load()
@@ -274,7 +276,7 @@ class LeftPanel(QWidget):
             self.btn_cv.setEnabled(True),
             self.btn_cv.setText("Cargar CV (PDF o DOCX)"),
         ))
-        self.pool.start(worker)
+        self.ai_pool.start(worker)
 
     def _cv_listo(self, data: dict) -> None:
         # Agrega tecnologías detectadas sin borrar ni duplicar las manuales.

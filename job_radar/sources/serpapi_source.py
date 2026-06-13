@@ -20,6 +20,7 @@ class SerpApiSource(JobSource):
         api_key: str,
         query: str = "desarrollador frontend",
         location: str = "Mexico",
+        google_domain: str = "google.com.mx",
         timeout: int = 30,
         proxies: dict[str, str] | None = None,
     ) -> None:
@@ -27,6 +28,7 @@ class SerpApiSource(JobSource):
         self.api_key = api_key
         self.query = query
         self.location = location
+        self.google_domain = google_domain
 
     def fetch(self) -> list[Job]:
         if not self.api_key:
@@ -36,6 +38,7 @@ class SerpApiSource(JobSource):
             "engine": "google_jobs",
             "q": self.query,
             "location": self.location,
+            "google_domain": self.google_domain,
             "hl": "es",
             "gl": "mx",
             "api_key": self.api_key,
@@ -46,7 +49,10 @@ class SerpApiSource(JobSource):
             data = resp.json()
 
         if "error" in data:
-            raise RuntimeError(f"SerpAPI: {data['error']}")
+            error = str(data["error"])
+            if "hasn't returned any results" in error.lower():
+                return []
+            raise RuntimeError(f"SerpAPI: {error}")
 
         jobs: list[Job] = []
         for item in data.get("jobs_results", []):

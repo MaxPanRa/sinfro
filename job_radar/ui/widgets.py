@@ -90,13 +90,14 @@ class Chip(QWidget):
         boton.setFixedSize(18, 18)
         boton.setCursor(Qt.PointingHandCursor)
         boton.setStyleSheet(
-            "QPushButton{border:none;border-radius:9px;background:#c0392b;"
-            "color:white;font-weight:bold;} QPushButton:hover{background:#e74c3c;}"
+            "QPushButton{border:none;border-radius:9px;background:#0f766e;"
+            "color:white;font-weight:bold;} QPushButton:hover{background:#115e59;}"
         )
         boton.clicked.connect(lambda: self.removed.emit(self._text))
         layout.addWidget(label)
         layout.addWidget(boton)
         self.setStyleSheet(
-            "#Chip{background:#34495e;border-radius:12px;} QLabel{color:white;}"
+            "#Chip{background:#ccfbf1;border:1px solid #5eead4;border-radius:12px;}"
+            "QLabel{color:#134e4a;}"
         )
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)

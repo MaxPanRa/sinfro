@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     raw_json           TEXT,                      -- payload original de la fuente
     detected_at        TEXT NOT NULL,
     seen               INTEGER NOT NULL DEFAULT 0,
+    visited_site       INTEGER NOT NULL DEFAULT 0,
     applied            INTEGER NOT NULL DEFAULT 0,
     applied_at         TEXT,
     discarded          INTEGER NOT NULL DEFAULT 0,
@@ -110,6 +111,7 @@ class Database:
     def _init_schema(self) -> None:
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            self._ensure_column("jobs", "visited_site", "INTEGER NOT NULL DEFAULT 0")
             # Fila única de perfil.
             self._conn.execute(
                 "INSERT OR IGNORE INTO profile (id, summary) VALUES (1, '')"
@@ -121,6 +123,14 @@ class Database:
                     (key, value),
                 )
             self._conn.commit()
+
+    def _ensure_column(self, table: str, column: str, ddl: str) -> None:
+        existing = {
+            row["name"]
+            for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in existing:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def close(self) -> None:
         with self._lock:
@@ -247,6 +257,9 @@ class Database:
     def mark_seen(self, uid: str) -> None:
         self._execute("UPDATE jobs SET seen = 1 WHERE uid = ?", (uid,))
 
+    def mark_visited_site(self, uid: str) -> None:
+        self._execute("UPDATE jobs SET visited_site = 1 WHERE uid = ?", (uid,))
+
     def mark_applied(self, uid: str) -> None:
         self._execute(
             "UPDATE jobs SET applied = 1, applied_at = ? WHERE uid = ? AND applied = 0",
@@ -255,6 +268,14 @@ class Database:
 
     def mark_discarded(self, uid: str) -> None:
         self._execute("UPDATE jobs SET discarded = 1 WHERE uid = ?", (uid,))
+
+    def clear_jobs_and_search_history(self) -> None:
+        """Borra bandeja, evaluaciones cacheadas y corridas de búsqueda."""
+        with self._lock:
+            self._conn.execute("DELETE FROM evaluations")
+            self._conn.execute("DELETE FROM jobs")
+            self._conn.execute("DELETE FROM runs")
+            self._conn.commit()
 
     def get_job(self, uid: str) -> dict[str, Any] | None:
         rows = self._query("SELECT * FROM jobs WHERE uid = ?", (uid,))
@@ -269,8 +290,8 @@ class Database:
         """Lista vacantes para la bandeja, ordenadas por fecha de detección desc.
 
         filtro: 'todas' | 'no_vistas' | 'aplicadas' | 'descartadas'.
-        Si ``show_duplicates`` es False, las descartadas se ocultan (salvo en su
-        propio filtro). Los duplicados por uid ya no existen (uid es PK).
+        En 'todas' las descartadas SÍ se muestran (la bandeja las colorea de rojo);
+        solo 'no_vistas' las oculta. Los duplicados por uid ya no existen (uid es PK).
         """
         where = []
         if filtro == "no_vistas":
@@ -279,8 +300,7 @@ class Database:
             where.append("applied = 1")
         elif filtro == "descartadas":
             where.append("discarded = 1")
-        else:  # todas
-            where.append("discarded = 0")
+        # 'todas': sin filtro de estado → incluye descartadas (se ven en rojo).
         sql = "SELECT * FROM jobs"
         if where:
             sql += " WHERE " + " AND ".join(where)

@@ -159,6 +159,20 @@ class OpenCodeClient:
             )
         return path
 
+    @staticmethod
+    def _subprocess_options() -> dict:
+        """Opciones de subprocess para que OpenCode no abra ventanas en Windows."""
+        if os.name != "nt":
+            return {}
+
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        return {
+            "creationflags": subprocess.CREATE_NO_WINDOW,
+            "startupinfo": startupinfo,
+        }
+
     def run(self, prompt: str, model: str, timeout: int) -> str:
         """Ejecuta una llamada y devuelve la salida cruda (stdout+stderr limpios).
 
@@ -190,6 +204,7 @@ class OpenCodeClient:
                 # lanzarse desde otro proceso), se cuelga esperando EOF. DEVNULL
                 # le da EOF inmediato. No usamos shell=True (seguridad).
                 stdin=subprocess.DEVNULL,
+                **self._subprocess_options(),
             )
         except subprocess.TimeoutExpired as exc:
             raise OpenCodeError(f"Timeout ({timeout}s) llamando a OpenCode") from exc

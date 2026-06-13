@@ -28,7 +28,7 @@ def main() -> int:
 
     # Inserta una vacante de prueba para poblar la bandeja y el popup.
     job = Job(title="Senior React Engineer", company="Acme", source="RemoteOK",
-              url="https://example.com/job", location="Remoto", modality="Remoto",
+              url="https://example.com/job", location="Ciudad de México, México", modality="Remoto",
               description="React, TypeScript, Node. 100% remoto.")
     db.insert_job(job.to_dict())
     db.set_quick_classification(job.uid, 82, {"match_score": 82, "modalidad": "Remoto",

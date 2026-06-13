@@ -88,9 +88,11 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "opencode_api_key": "",
     "fast_model": DEFAULT_FAST_MODEL,
     "deep_model": DEFAULT_DEEP_MODEL,
+    "evaluation_mode": "rapida",  # "rapida" | "profunda"
     "use_free_fallback": "0",
     "free_model": DEFAULT_FREE_MODEL,
     "serpapi_key": "",
+    "ubicacion": "Toda la República",
     "nivel_ingles": "B2",
     "salario_monto": "25",
     "salario_moneda": "USD",
@@ -98,5 +100,6 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "proxy_enabled": "0",
     "proxy_host": "",  # formato host:puerto
     "match_threshold": "70",
+    "group_b_hour": "6",
     "dev_fast_scheduler": "0",  # flag de desarrollo: intervalo 1 min
 }
