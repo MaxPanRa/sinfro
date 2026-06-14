@@ -53,16 +53,21 @@ def _extract_docx(path: Path) -> str:
 
 
 _PROMPT = """\
-Eres un analista de currículums. A partir del texto del CV de abajo, responde \
-ÚNICAMENTE con un objeto JSON válido (sin markdown, sin texto extra) con esta forma:
+Eres un analista de currículums para CUALQUIER profesión (no solo tecnología).
+A partir del texto del CV de abajo, responde ÚNICAMENTE con un objeto JSON válido \
+(sin markdown, sin texto extra) con esta forma:
 {{
   "resumen": "<resumen profesional del candidato en 3-5 frases, en español>",
-  "tecnologias": [
-    {{"name": "<tecnología>", "level": <entero 1-10 según dominio aparente>}}
+  "keywords": ["<6 palabras clave de búsqueda de empleo acordes al perfil>"],
+  "skills": [
+    {{"name": "<skill>", "level": <entero 1-10 según dominio aparente>}}
   ]
 }}
-Incluye solo tecnologías reales (lenguajes, frameworks, herramientas, nubes, BD).
-Estima el nivel por años/uso/seniority que se infiera. Máximo 30 tecnologías.
+Las skills pueden ser de CUALQUIER tipo: técnicas, administrativas, legales, \
+soft skills, liderazgo, idiomas, herramientas, etc. — lo que aplique al perfil.
+Las keywords son términos cortos para buscar vacantes (ej. para un abogado: \
+"abogado corporativo", "litigio"; para un dev: "frontend", "react"). Exactamente 6.
+Estima el nivel por años/uso/seniority. Máximo 30 skills.
 
 === CV ===
 {texto}
@@ -70,7 +75,7 @@ Estima el nivel por años/uso/seniority que se infiera. Máximo 30 tecnologías.
 
 
 def analyze_cv(client: OpenCodeClient, texto_cv: str, timeout: int = 150) -> dict[str, Any]:
-    """Analiza el CV con IA. Devuelve ``{"resumen": str, "tecnologias": [...]}``.
+    """Analiza el CV con IA. Devuelve ``{"resumen", "keywords": [...6], "skills": [...]}``.
 
     Normaliza/valida la salida. Lanza OpenCodeError/ValueError si falla.
     """
@@ -79,8 +84,17 @@ def analyze_cv(client: OpenCodeClient, texto_cv: str, timeout: int = 150) -> dic
     data = parse_json_loose(raw)
 
     resumen = str(data.get("resumen", "")).strip()
-    techs_norm: list[dict[str, Any]] = []
-    for t in data.get("tecnologias", []):
+
+    keywords: list[str] = []
+    for kw in data.get("keywords", [])[:6]:
+        kw = str(kw).strip()
+        if kw:
+            keywords.append(kw[:40])
+
+    # Acepta "skills" (nuevo) o "tecnologias" (compatibilidad).
+    raw_skills = data.get("skills") or data.get("tecnologias") or []
+    skills_norm: list[dict[str, Any]] = []
+    for t in raw_skills:
         if not isinstance(t, dict):
             continue
         name = str(t.get("name", "")).strip()
@@ -90,5 +104,7 @@ def analyze_cv(client: OpenCodeClient, texto_cv: str, timeout: int = 150) -> dic
             level = int(float(t.get("level", 5)))
         except (TypeError, ValueError):
             level = 5
-        techs_norm.append({"name": name[:60], "level": max(1, min(10, level))})
-    return {"resumen": resumen, "tecnologias": techs_norm}
+        skills_norm.append({"name": name[:60], "level": max(1, min(10, level))})
+    # "tecnologias" se mantiene como alias para el código que ya lo usa.
+    return {"resumen": resumen, "keywords": keywords,
+            "skills": skills_norm, "tecnologias": skills_norm}

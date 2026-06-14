@@ -69,11 +69,9 @@ class MainWindow(QMainWindow):
 
     def _wire(self) -> None:
         self.left.monitoring_toggled.connect(self._on_monitoring)
-        self.left.filtros_cambiados.connect(
-            lambda: self.inbox.set_mostrar_repetidas(self.left.mostrar_repetidas())
-        )
+        # Al cambiar de perfil, la bandeja muestra el inbox del nuevo perfil.
+        self.left.profile_changed.connect(self.inbox.refresh)
         self.inbox.job_opened.connect(self._abrir_evaluacion)
-        self.inbox.set_mostrar_repetidas(self.left.mostrar_repetidas())
 
     # -- Acciones de menú -----------------------------------------------------
 

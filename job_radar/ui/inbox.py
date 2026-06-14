@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -14,6 +16,72 @@ from PySide6.QtWidgets import (
 
 from ..db.database import Database
 from ..service import AppService
+
+#: Claves comunes donde las fuentes guardan la fecha de publicación.
+_DATE_KEYS = ("date_posted", "posted_at", "date", "published", "publication_date",
+              "pubDate", "updated", "created_at", "updatedAt", "created")
+
+
+def _parse_fecha(valor) -> datetime | None:
+    if valor is None:
+        return None
+    # ¿Epoch (segundos o ms)?
+    try:
+        n = float(valor)
+        if n > 1_000_000:
+            if n > 1_000_000_000_000:
+                n /= 1000
+            return datetime.fromtimestamp(n, tz=timezone.utc)
+    except (TypeError, ValueError):
+        pass
+    s = str(valor).strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    try:
+        d = parsedate_to_datetime(s)
+        if d:
+            return d
+    except (TypeError, ValueError, IndexError):
+        pass
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def dias_publicada(job: dict) -> int | None:
+    """Días desde que se publicó la vacante, si la fuente trae una fecha usable."""
+    raw = job.get("raw_json")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    for k in _DATE_KEYS:
+        if data.get(k):
+            d = _parse_fecha(data[k])
+            if d:
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=timezone.utc)
+                dias = (datetime.now(timezone.utc) - d).days
+                if 0 <= dias <= 3650:
+                    return dias
+    return None
+
+
+def _texto_antiguedad(dias: int) -> str:
+    if dias <= 0:
+        return "hoy"
+    if dias == 1:
+        return "hace 1 día"
+    return f"hace {dias} días"
 
 FILTROS = [("Todas", "todas"), ("No vistas", "no_vistas"),
            ("Aplicadas", "aplicadas"), ("Descartadas", "descartadas")]
@@ -96,11 +164,15 @@ class JobRow(QWidget):
         titulo.setStyleSheet("color:#1f2933;")
         v.addWidget(titulo)
 
-        meta = " · ".join(filter(None, [
+        partes_meta = [
             job.get("company", ""), job.get("source", ""), job.get("modality", ""),
             job.get("location", ""),
-        ]))
-        lbl_meta = QLabel(meta[:160])
+        ]
+        dias = dias_publicada(job)
+        if dias is not None:
+            partes_meta.append("📅 " + _texto_antiguedad(dias))
+        meta = " · ".join(filter(None, partes_meta))
+        lbl_meta = QLabel(meta[:180])
         lbl_meta.setStyleSheet("color:#7f8c8d;font-size:10px;")
         v.addWidget(lbl_meta)
 

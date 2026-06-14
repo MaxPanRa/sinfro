@@ -1,15 +1,15 @@
-"""Columna izquierda: parámetros de búsqueda y control de monitoreo."""
+"""Columna izquierda: perfiles + parámetros de búsqueda y control de monitoreo."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import QThreadPool, Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QInputDialog,
+    QComboBox, QCompleter, QFileDialog, QGroupBox, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox,
     QTextEdit, QVBoxLayout, QWidget,
 )
 
-from ..config import DEFAULT_KEYWORDS, MODALIDADES, UBICACIONES
+from ..config import MODALIDADES, SKILLS_CATALOG, UBICACIONES
 from ..db.database import Database
 from ..profile.cv_parser import analyze_cv, extract_cv_text
 from ..service import AppService
@@ -18,12 +18,11 @@ from .workers import Worker
 
 
 class LeftPanel(QWidget):
-    """Panel de configuración de búsqueda. Persiste todo en SQLite."""
+    """Panel de configuración de búsqueda por perfil. Persiste todo en SQLite."""
 
-    #: Emitida al pulsar el botón grande: True=comenzar, False=detener.
     monitoring_toggled = Signal(bool)
-    #: Emitida cuando cambian filtros que afectan la bandeja (repetidas).
-    filtros_cambiados = Signal()
+    #: Emitida al cambiar/crear/eliminar perfil (la ventana refresca la bandeja).
+    profile_changed = Signal()
 
     def __init__(self, db: Database, service: AppService, pool: QThreadPool,
                  ai_pool: QThreadPool | None = None,
@@ -35,7 +34,7 @@ class LeftPanel(QWidget):
         self.ai_pool = ai_pool or pool
         self._monitoring = False
         self._build()
-        self._load()
+        self.reload_data()
 
     # -- Construcción ---------------------------------------------------------
 
@@ -51,11 +50,12 @@ class LeftPanel(QWidget):
         col.setContentsMargins(8, 8, 8, 8)
         col.setSpacing(7)
 
-        col.addWidget(self._build_keywords())
-        col.addWidget(self._build_modalidad_ubicacion())
-        col.addWidget(self._build_tecnologias())
+        col.addWidget(self._build_profile_bar())
         col.addWidget(self._build_cv())
-        col.addWidget(self._build_opciones())
+        col.addWidget(self._build_keywords())
+        col.addWidget(self._build_skills())
+        col.addWidget(self._build_summary())
+        col.addWidget(self._build_modalidad_ubicacion())
         col.addWidget(self._build_control())
         col.addStretch(1)
 
@@ -64,6 +64,104 @@ class LeftPanel(QWidget):
         lbl = QLabel(texto)
         lbl.setStyleSheet("color:#475569;font-size:10px;font-weight:bold;")
         return lbl
+
+    # -- Perfiles -------------------------------------------------------------
+
+    def _build_profile_bar(self) -> QGroupBox:
+        grp = QGroupBox("Perfil")
+        h = QHBoxLayout(grp)
+        h.setSpacing(4)
+        self.profile_combo = QComboBox()
+        self.profile_combo.currentIndexChanged.connect(self._on_profile_selected)
+        h.addWidget(self.profile_combo, 1)
+        for icono, tip, slot in (
+            ("➕", "Nuevo perfil", self._new_profile),
+            ("✎", "Renombrar perfil", self._rename_profile),
+            ("🗑", "Eliminar perfil", self._delete_profile),
+        ):
+            b = QPushButton(icono)
+            b.setToolTip(tip)
+            b.setFixedWidth(34)
+            b.clicked.connect(slot)
+            h.addWidget(b)
+        return grp
+
+    def _reload_profile_combo(self) -> None:
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        activo = self.db.active_profile_id()
+        idx_activo = 0
+        for i, p in enumerate(self.db.list_profiles()):
+            self.profile_combo.addItem(p["name"], p["id"])
+            if p["id"] == activo:
+                idx_activo = i
+        self.profile_combo.setCurrentIndex(idx_activo)
+        self.profile_combo.blockSignals(False)
+
+    def _on_profile_selected(self, _index: int) -> None:
+        pid = self.profile_combo.currentData()
+        if pid is None:
+            return
+        self.db.set_active_profile(int(pid))
+        self.reload_data()
+        self.profile_changed.emit()
+
+    def _new_profile(self) -> None:
+        nombre, ok = QInputDialog.getText(self, "Nuevo perfil", "Nombre del perfil:")
+        if ok and nombre.strip():
+            pid = self.db.create_profile(nombre.strip())
+            self.db.set_active_profile(pid)
+            self._reload_profile_combo()
+            self.reload_data()
+            self.profile_changed.emit()
+
+    def _rename_profile(self) -> None:
+        pid = self.profile_combo.currentData()
+        actual = self.profile_combo.currentText()
+        nombre, ok = QInputDialog.getText(
+            self, "Renombrar perfil", "Nuevo nombre:", text=actual)
+        if ok and nombre.strip() and pid is not None:
+            self.db.rename_profile(int(pid), nombre.strip())
+            self._reload_profile_combo()
+
+    def _delete_profile(self) -> None:
+        pid = self.profile_combo.currentData()
+        nombre = self.profile_combo.currentText()
+        if pid is None:
+            return
+        resp = QMessageBox.question(
+            self, "Eliminar perfil",
+            f"¿Eliminar el perfil «{nombre}» y TODO su inbox, keywords y skills?\n"
+            "Esta acción no se puede deshacer.")
+        if resp != QMessageBox.Yes:
+            return
+        try:
+            self.db.delete_profile(int(pid))
+        except ValueError as exc:
+            QMessageBox.warning(self, "No se puede", str(exc))
+            return
+        self._reload_profile_combo()
+        self.reload_data()
+        self.profile_changed.emit()
+
+    # -- CV -------------------------------------------------------------------
+
+    def _build_cv(self) -> QGroupBox:
+        grp = QGroupBox("Mi CV")
+        v = QVBoxLayout(grp)
+        v.setSpacing(4)
+        self.btn_cv = QPushButton("Cargar CV (PDF o DOCX)")
+        self.btn_cv.clicked.connect(self._cargar_cv)
+        v.addWidget(self.btn_cv)
+        ayuda = QLabel(
+            "Al cargarlo se llenan automáticamente las palabras clave, skills y el "
+            "resumen de este perfil.")
+        ayuda.setWordWrap(True)
+        ayuda.setStyleSheet("color:#64748b;font-size:10px;")
+        v.addWidget(ayuda)
+        return grp
+
+    # -- Keywords -------------------------------------------------------------
 
     def _build_keywords(self) -> QGroupBox:
         grp = QGroupBox("Palabras clave")
@@ -83,40 +181,21 @@ class LeftPanel(QWidget):
         v.addWidget(self.kw_container)
         return grp
 
-    def _build_modalidad_ubicacion(self) -> QGroupBox:
-        """Modalidad (multi-select) y Ubicación en la misma fila."""
-        grp = QGroupBox("Modalidad y ubicación")
-        h = QHBoxLayout(grp)
-        h.setSpacing(8)
+    # -- Skills ---------------------------------------------------------------
 
-        col_m = QVBoxLayout()
-        col_m.setSpacing(2)
-        col_m.addWidget(self._mini_label("Modalidad"))
-        self.modalidad_combo = CheckableComboBox("Cualquiera")
-        self.modalidad_combo.addItems(MODALIDADES)
-        self.modalidad_combo.changed.connect(self._save_modalidad)
-        col_m.addWidget(self.modalidad_combo)
-        h.addLayout(col_m, 1)
-
-        col_u = QVBoxLayout()
-        col_u.setSpacing(2)
-        col_u.addWidget(self._mini_label("Ubicación"))
-        self.ubicacion = QComboBox()
-        self.ubicacion.addItems(UBICACIONES)
-        self.ubicacion.currentTextChanged.connect(
-            lambda t: self.db.set_setting("ubicacion", t)
-        )
-        col_u.addWidget(self.ubicacion)
-        h.addLayout(col_u, 1)
-        return grp
-
-    def _build_tecnologias(self) -> QGroupBox:
-        grp = QGroupBox("Mis tecnologías")
+    def _build_skills(self) -> QGroupBox:
+        grp = QGroupBox("Skills")
         v = QVBoxLayout(grp)
         v.setSpacing(5)
         fila = QHBoxLayout()
         self.tech_input = QLineEdit()
-        self.tech_input.setPlaceholderText("Tecnología…")
+        self.tech_input.setPlaceholderText("Escribe una skill (autocompleta)…")
+        completer = QCompleter(SKILLS_CATALOG, self)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        completer.setCompletionMode(QCompleter.PopupCompletion)
+        completer.setMaxVisibleItems(12)
+        self.tech_input.setCompleter(completer)
         self.tech_level = QSpinBox()
         self.tech_level.setRange(1, 10)
         self.tech_level.setValue(5)
@@ -132,12 +211,10 @@ class LeftPanel(QWidget):
         self.tech_container = QWidget()
         self.tech_flow = FlowLayout(self.tech_container, spacing=4)
         v.addWidget(self.tech_container)
-
-        v.addWidget(self._build_tech_legend())
+        v.addWidget(self._build_skill_legend())
         return grp
 
-    def _build_tech_legend(self) -> QWidget:
-        """Leyenda: colores por origen y cómo editar/eliminar."""
+    def _build_skill_legend(self) -> QWidget:
         cont = QWidget()
         h = QHBoxLayout(cont)
         h.setContentsMargins(0, 0, 0, 0)
@@ -166,41 +243,54 @@ class LeftPanel(QWidget):
         h.addStretch(1)
         return cont
 
-    def _build_cv(self) -> QGroupBox:
-        grp = QGroupBox("Mi CV y perfil")
+    # -- Resumen / descripción del CV -----------------------------------------
+
+    def _build_summary(self) -> QGroupBox:
+        grp = QGroupBox("Descripción del perfil")
         v = QVBoxLayout(grp)
-        v.setSpacing(5)
-        self.btn_cv = QPushButton("Cargar CV (PDF o DOCX)")
-        self.btn_cv.clicked.connect(self._cargar_cv)
-        v.addWidget(self.btn_cv)
-        v.addWidget(self._mini_label(
-            "Resumen del perfil (editable, se usa en cada evaluación):"))
+        v.setSpacing(4)
+        v.addWidget(self._mini_label("Editable; se usa en cada evaluación:"))
         self.perfil_summary = QTextEdit()
         self.perfil_summary.setPlaceholderText(
-            "Se autocompleta al cargar el CV; puedes editarlo."
-        )
-        self.perfil_summary.setMinimumHeight(170)
+            "Se autocompleta al cargar el CV; puedes editarlo.")
+        self.perfil_summary.setMinimumHeight(150)
         self.perfil_summary.textChanged.connect(self._save_summary)
         v.addWidget(self.perfil_summary)
         return grp
 
-    def _build_opciones(self) -> QGroupBox:
-        grp = QGroupBox("Opciones")
-        v = QVBoxLayout(grp)
-        self.chk_repetidas = QCheckBox("Mostrar vacantes repetidas")
-        self.chk_repetidas.stateChanged.connect(self._on_repetidas)
-        v.addWidget(self.chk_repetidas)
+    # -- Modalidad y ubicación ------------------------------------------------
+
+    def _build_modalidad_ubicacion(self) -> QGroupBox:
+        grp = QGroupBox("Modalidad y ubicación")
+        h = QHBoxLayout(grp)
+        h.setSpacing(8)
+        col_m = QVBoxLayout()
+        col_m.setSpacing(2)
+        col_m.addWidget(self._mini_label("Modalidad"))
+        self.modalidad_combo = CheckableComboBox("Cualquiera")
+        self.modalidad_combo.addItems(MODALIDADES)
+        self.modalidad_combo.changed.connect(self._save_modalidad)
+        col_m.addWidget(self.modalidad_combo)
+        h.addLayout(col_m, 1)
+        col_u = QVBoxLayout()
+        col_u.setSpacing(2)
+        col_u.addWidget(self._mini_label("Ubicación"))
+        self.ubicacion = QComboBox()
+        self.ubicacion.addItems(UBICACIONES)
+        self.ubicacion.currentTextChanged.connect(
+            lambda t: self.db.set_setting("ubicacion", t))
+        col_u.addWidget(self.ubicacion)
+        h.addLayout(col_u, 1)
         return grp
+
+    # -- Control de monitoreo -------------------------------------------------
 
     def _build_control(self) -> QWidget:
         cont = QWidget()
         v = QVBoxLayout(cont)
         self.btn_monitor = QPushButton("▶  Comenzar monitoreo")
         self.btn_monitor.setMinimumHeight(44)
-        self.btn_monitor.setStyleSheet(
-            "QPushButton{background:#27ae60;color:white;font-weight:bold;font-size:14px;"
-            "border-radius:6px;} QPushButton:hover{background:#2ecc71;}"
-        )
+        self._estilo_monitor(False)
         self.btn_monitor.clicked.connect(self._toggle_monitor)
         v.addWidget(self.btn_monitor)
         self.lbl_estado = QLabel("Monitoreo detenido.")
@@ -209,10 +299,17 @@ class LeftPanel(QWidget):
         v.addWidget(self.lbl_estado)
         return cont
 
-    # -- Carga inicial --------------------------------------------------------
+    def _estilo_monitor(self, activo: bool) -> None:
+        color, hover = (("#c0392b", "#e74c3c") if activo else ("#27ae60", "#2ecc71"))
+        self.btn_monitor.setStyleSheet(
+            f"QPushButton{{background:{color};color:white;font-weight:bold;"
+            f"font-size:14px;border-radius:6px;}} QPushButton:hover{{background:{hover};}}")
 
-    def _load(self) -> None:
-        self.db.seed_keywords_if_empty(DEFAULT_KEYWORDS)
+    # -- Carga / recarga de datos del perfil activo ---------------------------
+
+    def reload_data(self) -> None:
+        """Recarga keywords, skills, resumen, modalidad y ubicación del perfil activo."""
+        self._reload_profile_combo()
         self._refresh_keywords()
         self._refresh_techs()
         self.perfil_summary.blockSignals(True)
@@ -227,7 +324,9 @@ class LeftPanel(QWidget):
         if ub:
             i = self.ubicacion.findText(ub)
             if i >= 0:
+                self.ubicacion.blockSignals(True)
                 self.ubicacion.setCurrentIndex(i)
+                self.ubicacion.blockSignals(False)
 
     # -- Keywords -------------------------------------------------------------
 
@@ -252,21 +351,12 @@ class LeftPanel(QWidget):
         self.db.remove_keyword(palabra)
         self._refresh_keywords()
 
-    # -- Modalidad / opciones -------------------------------------------------
+    # -- Modalidad ------------------------------------------------------------
 
     def _save_modalidad(self) -> None:
         self.db.set_setting("modalidades", ",".join(self.modalidad_combo.checked_items()))
 
-    def _on_repetidas(self) -> None:
-        self.db.set_setting(
-            "mostrar_repetidas", "1" if self.chk_repetidas.isChecked() else "0"
-        )
-        self.filtros_cambiados.emit()
-
-    def mostrar_repetidas(self) -> bool:
-        return self.chk_repetidas.isChecked()
-
-    # -- Tecnologías ----------------------------------------------------------
+    # -- Skills ---------------------------------------------------------------
 
     def _add_tech(self) -> None:
         nombre = self.tech_input.text().strip()
@@ -287,8 +377,7 @@ class LeftPanel(QWidget):
             self.tech_flow.addWidget(badge)
 
     def _edit_tech(self, tech_id: int) -> None:
-        tech = next(
-            (t for t in self.db.get_technologies() if t["id"] == tech_id), None)
+        tech = next((t for t in self.db.get_technologies() if t["id"] == tech_id), None)
         if not tech:
             return
         nivel, ok = QInputDialog.getInt(
@@ -302,17 +391,16 @@ class LeftPanel(QWidget):
         self.db.remove_technology(int(tech_id))
         self._refresh_techs()
 
-    # -- Perfil ---------------------------------------------------------------
+    # -- Perfil (resumen) -----------------------------------------------------
 
     def _save_summary(self) -> None:
         self.db.set_profile_summary(self.perfil_summary.toPlainText())
 
-    # -- CV -------------------------------------------------------------------
+    # -- CV (carga + análisis IA) ---------------------------------------------
 
     def _cargar_cv(self) -> None:
         ruta, _ = QFileDialog.getOpenFileName(
-            self, "Selecciona tu CV", "", "Documentos (*.pdf *.docx)"
-        )
+            self, "Selecciona tu CV", "", "Documentos (*.pdf *.docx)")
         if not ruta:
             return
         self.btn_cv.setEnabled(False)
@@ -335,10 +423,16 @@ class LeftPanel(QWidget):
         self.ai_pool.start(worker)
 
     def _cv_listo(self, data: dict) -> None:
-        # Agrega tecnologías detectadas sin borrar ni duplicar las manuales.
-        for t in data.get("tecnologias", []):
+        # Keywords del CV (hasta 6), sin duplicar.
+        for kw in data.get("keywords", []):
+            self.db.add_keyword(kw)
+        self._refresh_keywords()
+        # Skills detectadas (origen 'cv'), sin pisar las manuales.
+        skills = data.get("skills") or data.get("tecnologias") or []
+        for t in skills:
             self.db.upsert_technology(t["name"], t["level"], "cv")
         self._refresh_techs()
+        # Resumen del perfil.
         resumen = data.get("resumen", "").strip()
         if resumen:
             actual = self.perfil_summary.toPlainText().strip()
@@ -346,29 +440,19 @@ class LeftPanel(QWidget):
             self.perfil_summary.setPlainText(nuevo)
         QMessageBox.information(
             self, "CV analizado",
-            f"Se detectaron {len(data.get('tecnologias', []))} tecnologías y se "
-            "actualizó el resumen del perfil."
-        )
+            f"Se llenaron {len(data.get('keywords', []))} palabras clave, "
+            f"{len(skills)} skills y el resumen del perfil.")
 
     def _cv_error(self, msg: str) -> None:
         QMessageBox.warning(self, "Error al analizar el CV", msg)
 
-    # -- Control de monitoreo -------------------------------------------------
+    # -- Control --------------------------------------------------------------
 
     def _toggle_monitor(self) -> None:
         self._monitoring = not self._monitoring
-        if self._monitoring:
-            self.btn_monitor.setText("⏹  Detener monitoreo")
-            self.btn_monitor.setStyleSheet(
-                "QPushButton{background:#c0392b;color:white;font-weight:bold;"
-                "font-size:14px;border-radius:6px;} QPushButton:hover{background:#e74c3c;}"
-            )
-        else:
-            self.btn_monitor.setText("▶  Comenzar monitoreo")
-            self.btn_monitor.setStyleSheet(
-                "QPushButton{background:#27ae60;color:white;font-weight:bold;"
-                "font-size:14px;border-radius:6px;} QPushButton:hover{background:#2ecc71;}"
-            )
+        self.btn_monitor.setText(
+            "⏹  Detener monitoreo" if self._monitoring else "▶  Comenzar monitoreo")
+        self._estilo_monitor(self._monitoring)
         self.monitoring_toggled.emit(self._monitoring)
 
     def set_estado(self, texto: str) -> None:

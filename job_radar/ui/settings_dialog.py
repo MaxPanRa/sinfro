@@ -8,10 +8,11 @@ toggle de proxy VPS y umbral de match.
 from __future__ import annotations
 
 from PySide6.QtCore import QThreadPool, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
-    QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
+    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from ..config import JOOBLE_MONTHLY_QUOTA, NIVELES_INGLES, SERPAPI_MONTHLY_QUOTA
@@ -35,12 +36,25 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Ajustes")
         self.setMinimumWidth(560)
         self._build()
+        # La ventana nunca excede la pantalla; el contenido se scrollea.
+        avail = QGuiApplication.primaryScreen().availableGeometry().height()
+        self.setMaximumHeight(avail - 60)
+        self.resize(600, min(720, avail - 60))
         self._load()
         self._update_serp_quota()
         self._update_jooble_quota()
 
     def _build(self) -> None:
-        root = QVBoxLayout(self)
+        # Todo el contenido va dentro de un área scrolleable (cabe en monitores chicos).
+        dlg_layout = QVBoxLayout(self)
+        dlg_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        _cont = QWidget()
+        scroll.setWidget(_cont)
+        dlg_layout.addWidget(scroll)
+        root = QVBoxLayout(_cont)
 
         # --- OpenCode / IA ---
         grp_ia = QGroupBox("OpenCode Go e IA")
@@ -141,14 +155,19 @@ class SettingsDialog(QDialog):
 
         grp_mant = QGroupBox("Mantenimiento")
         v_mant = QVBoxLayout(grp_mant)
-        self.btn_limpiar_datos = QPushButton("Limpiar bandeja e historial de busqueda")
-        self.btn_limpiar_datos.setStyleSheet(
+        estilo_rojo = (
             "QPushButton{background:#c0392b;color:white;font-weight:bold;"
-            "border-radius:6px;padding:7px 10px;}"
-            "QPushButton:hover{background:#e74c3c;}"
-        )
-        self.btn_limpiar_datos.clicked.connect(self._limpiar_datos)
+            "border-radius:6px;padding:7px 10px;} QPushButton:hover{background:#e74c3c;}")
+        self.btn_limpiar_datos = QPushButton("Limpiar inbox del perfil actual")
+        self.btn_limpiar_datos.setStyleSheet(estilo_rojo)
+        self.btn_limpiar_datos.clicked.connect(self._limpiar_inbox_actual)
         v_mant.addWidget(self.btn_limpiar_datos)
+        self.btn_limpiar_todos = QPushButton("Resetear TODOS los inboxes")
+        self.btn_limpiar_todos.setStyleSheet(
+            "QPushButton{background:#7f1d1d;color:white;font-weight:bold;"
+            "border-radius:6px;padding:7px 10px;} QPushButton:hover{background:#991b1b;}")
+        self.btn_limpiar_todos.clicked.connect(self._limpiar_todos_inboxes)
+        v_mant.addWidget(self.btn_limpiar_todos)
         root.addWidget(grp_mant)
 
         botones = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -370,25 +389,38 @@ class SettingsDialog(QDialog):
         self.btn_buscar_empresa.setEnabled(True)
         self.btn_buscar_empresa.setText("Buscar empresa ATS")
 
-    def _limpiar_datos(self) -> None:
+    def _limpiar_inbox_actual(self) -> None:
         ok = QMessageBox.question(
             self,
-            "Limpiar bandeja",
-            "Esto borrara todas las vacantes, evaluaciones cacheadas e historial "
-            "de busquedas. Tus ajustes, keywords, tecnologias y perfil se conservan.\n\n"
-            "Continuar?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            "Limpiar inbox del perfil actual",
+            "Esto borra las vacantes y evaluaciones SOLO del perfil activo. Tus "
+            "keywords, skills y resumen de este perfil se conservan.\n\n¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if ok != QMessageBox.Yes:
             return
-        self.db.clear_jobs_and_search_history()
+        self.db.clear_current_inbox()
         self.datos_limpiados.emit()
         QMessageBox.information(
+            self, "Inbox limpiado",
+            "El inbox del perfil activo quedó vacío.")
+
+    def _limpiar_todos_inboxes(self) -> None:
+        ok = QMessageBox.question(
             self,
-            "Datos limpiados",
-            "La bandeja y el historial de busqueda quedaron vacios.",
+            "Resetear TODOS los inboxes",
+            "Esto borra las vacantes y evaluaciones de TODOS los perfiles, además "
+            "del historial de corridas. Keywords, skills y resúmenes se conservan.\n\n"
+            "¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
+        if ok != QMessageBox.Yes:
+            return
+        self.db.clear_all_inboxes()
+        self.datos_limpiados.emit()
+        QMessageBox.information(
+            self, "Inboxes reseteados",
+            "Se vaciaron los inboxes de todos los perfiles.")
 
     def _save_and_accept(self) -> None:
         pares = {
