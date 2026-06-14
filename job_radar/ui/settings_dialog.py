@@ -99,6 +99,15 @@ class SettingsDialog(QDialog):
         self.btn_buscar_jooble = QPushButton("Buscar Jooble MX")
         self.btn_buscar_jooble.clicked.connect(self._buscar_jooble)
         f_src.addRow("", self.btn_buscar_jooble)
+        # Adzuna (México + todas las profesiones; key gratis en developer.adzuna.com)
+        self.adzuna_app_id = QLineEdit()
+        self.adzuna_app_id.setPlaceholderText("app_id de Adzuna (gratis)")
+        f_src.addRow("Adzuna app_id:", self.adzuna_app_id)
+        self.adzuna_app_key = QLineEdit()
+        self.adzuna_app_key.setEchoMode(QLineEdit.Password)
+        self.adzuna_app_key.setPlaceholderText("app_key de Adzuna")
+        f_src.addRow("Adzuna app_key:", self.adzuna_app_key)
+
         self.ats_company = QLineEdit()
         self.ats_company.setPlaceholderText("slug o empresa: zillow, rippling, stripe...")
         f_src.addRow("Empresa / ATS:", self.ats_company)
@@ -186,6 +195,8 @@ class SettingsDialog(QDialog):
         self.free_model.setText(s.get("free_model", ""))
         self.serpapi_key.setText(s.get("serpapi_key", ""))
         self.jooble_key.setText(s.get("jooble_api_key", ""))
+        self.adzuna_app_id.setText(s.get("adzuna_app_id", ""))
+        self.adzuna_app_key.setText(s.get("adzuna_app_key", ""))
         self.ats_company.setText(s.get("ats_company", ""))
         idx_hour = self.group_b_hour.findData(s.get("group_b_hour", "6"))
         self.group_b_hour.setCurrentIndex(max(0, idx_hour))
@@ -432,6 +443,8 @@ class SettingsDialog(QDialog):
             "free_model": self.free_model.text().strip(),
             "serpapi_key": self.serpapi_key.text().strip(),
             "jooble_api_key": self.jooble_key.text().strip(),
+            "adzuna_app_id": self.adzuna_app_id.text().strip(),
+            "adzuna_app_key": self.adzuna_app_key.text().strip(),
             "ats_company": self.ats_company.text().strip(),
             "proxy_enabled": "1" if self.proxy_enabled.isChecked() else "0",
             "proxy_host": self.proxy_host.text().strip(),

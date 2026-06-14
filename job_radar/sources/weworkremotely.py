@@ -13,7 +13,8 @@ from .base import Job, JobSource, USER_AGENT, clean_html
 class WeWorkRemotelySource(JobSource):
     name = "WeWorkRemotely"
     group = "A"
-    URL = "https://weworkremotely.com/categories/remote-programming-jobs.rss"
+    # Feed general (todas las categorías), no solo programación.
+    URL = "https://weworkremotely.com/remote-jobs.rss"
 
     def fetch(self) -> list[Job]:
         # feedparser acepta un User-Agent para evitar respuestas vacías.

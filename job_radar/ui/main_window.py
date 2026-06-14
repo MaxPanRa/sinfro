@@ -181,7 +181,9 @@ class MainWindow(QMainWindow):
 
         Respeta la cuota mensual de SerpAPI y salta fuentes desactivadas (OCC).
         """
-        from ..sources import JobSpySource, JoobleSource, OCCSource, SerpApiSource
+        from ..sources import (
+            AdzunaSource, JobSpySource, JoobleSource, OCCSource, SerpApiSource,
+        )
 
         proxies = self.service.proxies()
         query = self.service.build_group_b_query()
@@ -192,6 +194,9 @@ class MainWindow(QMainWindow):
         serp_disponible = bool(serpapi_key) and self.service.serpapi_remaining() > 0
         jooble_key = self.db.get_setting("jooble_api_key", "")
         jooble_disponible = bool(jooble_key) and self.service.jooble_remaining() > 0
+        adzuna_id = self.db.get_setting("adzuna_app_id", "")
+        adzuna_key = self.db.get_setting("adzuna_app_key", "")
+        adzuna_disponible = bool(adzuna_id) and bool(adzuna_key)
         run_id = self.db.start_run("B", day_key)
 
         def tarea() -> dict:
@@ -234,6 +239,20 @@ class MainWindow(QMainWindow):
                     self.db.increment_quota(self.service.jooble_period())
                 except Exception as exc:  # noqa: BLE001
                     fallos.append(f"Jooble: {type(exc).__name__}")
+            # Adzuna (México + todas las profesiones; requiere app_id/app_key).
+            if adzuna_disponible:
+                try:
+                    adz = AdzunaSource(
+                        app_id=adzuna_id,
+                        app_key=adzuna_key,
+                        query=query,
+                        location=location,
+                        country="mx",
+                        proxies=proxies,
+                    )
+                    nuevos.extend(self.service.ingest_jobs(adz.fetch()))
+                except Exception as exc:  # noqa: BLE001
+                    fallos.append(f"Adzuna: {type(exc).__name__}")
             return {"nuevos": nuevos, "fallos": fallos, "run_id": run_id}
 
         worker = Worker(tarea)

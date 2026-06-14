@@ -194,6 +194,8 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "free_model": DEFAULT_FREE_MODEL,
     "serpapi_key": "",
     "jooble_api_key": "",
+    "adzuna_app_id": "",
+    "adzuna_app_key": "",
     "ats_company": "",
     "ubicacion": "Toda la República",
     "nivel_ingles": "B2",

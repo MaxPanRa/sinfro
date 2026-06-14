@@ -8,7 +8,8 @@ from .base import Job, JobSource, clean_html
 class RemotiveSource(JobSource):
     name = "Remotive"
     group = "A"
-    URL = "https://remotive.com/api/remote-jobs?category=software-dev&limit=100"
+    # Todas las categorías (no solo software): el filtro por keywords decide.
+    URL = "https://remotive.com/api/remote-jobs?limit=100"
 
     def fetch(self) -> list[Job]:
         with self._session() as s:

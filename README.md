@@ -149,13 +149,23 @@ opencode models   # lista los modelos disponibles con tu key
 
 | Fuente | API / método | Key | Notas |
 |--------|--------------|:---:|-------|
-| RemoteOK | JSON público | — | `remoteok.com/api` |
-| Remotive | JSON público | — | categoría software-dev |
-| We Work Remotely | RSS | — | feed de programación remota |
+| RemoteOK | JSON público | — | remoto, todas las áreas |
+| Remotive | JSON público | — | remoto, **todas las categorías** (no solo tech) |
+| We Work Remotely | RSS | — | feed general (todas las categorías) |
+| Jobicy | JSON público | — | remoto, cualquier profesión |
 | Hacker News | API Algolia | — | story *"Who is hiring"* + comentarios |
 | LinkedIn / Indeed | **JobSpy** | — | modo invitado, pocas páginas |
 | Google for Jobs | **SerpAPI** | ✅ | cuota gratuita **250 búsquedas/mes** |
+| Jooble | REST API | ✅ | `mx.jooble.org`, todas las profesiones |
+| **Adzuna** | REST API | ✅ | **México + todas las profesiones** (key gratis en developer.adzuna.com) |
 | OCC Mundial | scraping HTML | — | parsea las tarjetas de resultados |
+| Empresas (ATS) | REST API | — | Lever, Greenhouse, Workable, Ashby |
+
+> Las bolsas remotas (RemoteOK, Remotive, WWR, Jobicy) ya **no se limitan a
+> tecnología**: traen todas las áreas y el filtro por palabras clave del perfil
+> decide cuáles son relevantes. Para empleos **locales en México** de cualquier
+> profesión (abogacía, administración, finanzas…), **Adzuna** y **Jooble MX** son
+> las más completas.
 
 ### 🔍 SerpAPI (opcional, Google for Jobs)
 
