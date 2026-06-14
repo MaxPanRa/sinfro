@@ -107,6 +107,9 @@ class SettingsDialog(QDialog):
         self.adzuna_app_key.setEchoMode(QLineEdit.Password)
         self.adzuna_app_key.setPlaceholderText("app_key de Adzuna")
         f_src.addRow("Adzuna app_key:", self.adzuna_app_key)
+        self.btn_buscar_adzuna = QPushButton("Buscar Adzuna MX (ahora)")
+        self.btn_buscar_adzuna.clicked.connect(self._buscar_adzuna)
+        f_src.addRow("", self.btn_buscar_adzuna)
 
         self.ats_company = QLineEdit()
         self.ats_company.setPlaceholderText("slug o empresa: zillow, rippling, stripe...")
@@ -312,6 +315,51 @@ class SettingsDialog(QDialog):
         worker.signals.error.connect(self._jooble_error)
         worker.signals.finished.connect(self._update_jooble_quota)
         self.pool.start(worker)
+
+    def _buscar_adzuna(self) -> None:
+        if self.service is None:
+            QMessageBox.information(self, "No disponible",
+                                    "La busqueda manual no esta disponible en este contexto.")
+            return
+        app_id = self.adzuna_app_id.text().strip()
+        app_key = self.adzuna_app_key.text().strip()
+        if not app_id or not app_key:
+            QMessageBox.warning(
+                self, "Faltan datos", "Ingresa app_id y app_key de Adzuna.")
+            return
+        self.db.set_setting("adzuna_app_id", app_id)
+        self.db.set_setting("adzuna_app_key", app_key)
+
+        from ..sources import AdzunaSource
+        service = self.service
+        self.btn_buscar_adzuna.setEnabled(False)
+        self.btn_buscar_adzuna.setText("Buscando en Adzuna…")
+
+        def tarea() -> list[str]:
+            src = AdzunaSource(
+                app_id=app_id, app_key=app_key,
+                query=service.build_group_b_query(),
+                location=service.group_b_location(), country="mx")
+            return service.ingest_jobs(src.fetch())
+
+        worker = Worker(tarea)
+        worker.signals.result.connect(self._adzuna_listo)
+        worker.signals.error.connect(self._adzuna_error)
+        worker.signals.finished.connect(self._adzuna_finished)
+        self.pool.start(worker)
+
+    def _adzuna_listo(self, nuevos: list) -> None:
+        QMessageBox.information(
+            self, "Adzuna", f"Adzuna: {len(nuevos)} vacantes nuevas ingeridas.")
+        if nuevos:
+            self.vacantes_nuevas.emit(nuevos)
+
+    def _adzuna_error(self, msg: str) -> None:
+        QMessageBox.warning(self, "Error en Adzuna", msg)
+
+    def _adzuna_finished(self) -> None:
+        self.btn_buscar_adzuna.setEnabled(True)
+        self.btn_buscar_adzuna.setText("Buscar Adzuna MX (ahora)")
 
     def _buscar_empresa_ats(self) -> None:
         if self.service is None:
