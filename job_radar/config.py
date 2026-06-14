@@ -205,4 +205,5 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "match_threshold": "70",
     "group_b_hour": "6",
     "dev_fast_scheduler": "0",  # flag de desarrollo: intervalo 1 min
+    "settings_shared": "0",     # 0 = ajustes de búsqueda por perfil; 1 = compartidos
 }

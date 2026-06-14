@@ -45,15 +45,34 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self) -> None:
         barra = self.menuBar()
-        menu_ajustes = barra.addMenu("Ajustes")
+        self.menu_ajustes = barra.addMenu("Ajustes")
         act = QAction("Abrir Ajustes…", self)
         act.triggered.connect(self._abrir_ajustes)
-        menu_ajustes.addAction(act)
+        self.menu_ajustes.addAction(act)
 
         menu_ayuda = barra.addMenu("Ayuda")
+        self.act_shared = QAction(
+            "Usar un solo ajuste para todos los perfiles", self, checkable=True)
+        self.act_shared.setChecked(self.db.settings_shared())
+        self.act_shared.toggled.connect(self._toggle_shared_settings)
+        menu_ayuda.addAction(self.act_shared)
+        menu_ayuda.addSeparator()
         act_about = QAction("Acerca de", self)
         act_about.triggered.connect(self._about)
         menu_ayuda.addAction(act_about)
+        self._update_settings_menu_label()
+
+    def _update_settings_menu_label(self) -> None:
+        if self.db.settings_shared():
+            self.menu_ajustes.setTitle("Ajustes (compartidos)")
+        else:
+            self.menu_ajustes.setTitle(f"Ajustes · {self.db.active_profile_name()}")
+
+    def _toggle_shared_settings(self, shared: bool) -> None:
+        self.db.set_setting("settings_shared", "1" if shared else "0")
+        self._update_settings_menu_label()
+        self.left.reload_data()
+        self.inbox.refresh()
 
     def _build_body(self) -> None:
         splitter = QSplitter(Qt.Horizontal)
@@ -69,8 +88,9 @@ class MainWindow(QMainWindow):
 
     def _wire(self) -> None:
         self.left.monitoring_toggled.connect(self._on_monitoring)
-        # Al cambiar de perfil, la bandeja muestra el inbox del nuevo perfil.
+        # Al cambiar de perfil, la bandeja y el título de Ajustes se actualizan.
         self.left.profile_changed.connect(self.inbox.refresh)
+        self.left.profile_changed.connect(self._update_settings_menu_label)
         self.inbox.job_opened.connect(self._abrir_evaluacion)
 
     # -- Acciones de menú -----------------------------------------------------

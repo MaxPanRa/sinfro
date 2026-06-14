@@ -26,6 +26,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+#: Ajustes que pueden ser POR PERFIL (parámetros de búsqueda/evaluación).
+#: El resto (API keys, modelos, proxy, cuotas, flags) siempre es global/cuenta.
+PER_PROFILE_KEYS = {
+    "ubicacion", "modalidades", "salario_monto", "salario_moneda",
+    "salario_periodo", "nivel_ingles", "match_threshold", "evaluation_mode",
+    "ats_company",
+}
+
+
 #: DDL del esquema NUEVO (con perfiles). Idempotente vía IF NOT EXISTS.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS profiles (
@@ -85,6 +94,13 @@ CREATE TABLE IF NOT EXISTS technologies (
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS profile_settings (
+    profile_id INTEGER NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT,
+    PRIMARY KEY (profile_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS quotas (
@@ -216,15 +232,47 @@ class Database:
 
     # -- Settings -------------------------------------------------------------
 
-    def get_setting(self, key: str, default: str = "") -> str:
+    def _global_setting(self, key: str, default: str = "") -> str:
         rows = self._query("SELECT value FROM settings WHERE key = ?", (key,))
         return rows[0]["value"] if rows else default
 
+    def settings_shared(self) -> bool:
+        """True = un solo juego de ajustes para todos los perfiles."""
+        return self._global_setting("settings_shared", "0") == "1"
+
+    def _is_per_profile(self, key: str) -> bool:
+        return key in PER_PROFILE_KEYS and not self.settings_shared()
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        if self._is_per_profile(key):
+            rows = self._query(
+                "SELECT value FROM profile_settings WHERE profile_id = ? AND key = ?",
+                (self.active_profile_id(), key))
+            if rows:
+                return rows[0]["value"] if rows[0]["value"] is not None else default
+            # Fallback al valor global (sirve de default heredado).
+        return self._global_setting(key, default)
+
     def get_all_settings(self) -> dict[str, str]:
         rows = self._query("SELECT key, value FROM settings")
-        return {r["key"]: (r["value"] or "") for r in rows}
+        base = {r["key"]: (r["value"] or "") for r in rows}
+        if not self.settings_shared():
+            prof = self._query(
+                "SELECT key, value FROM profile_settings WHERE profile_id = ?",
+                (self.active_profile_id(),))
+            for r in prof:
+                if r["key"] in PER_PROFILE_KEYS:
+                    base[r["key"]] = r["value"] or ""
+        return base
 
     def set_setting(self, key: str, value: str) -> None:
+        if self._is_per_profile(key):
+            self._execute(
+                "INSERT INTO profile_settings (profile_id, key, value) "
+                "VALUES (?, ?, ?) ON CONFLICT(profile_id, key) "
+                "DO UPDATE SET value = excluded.value",
+                (self.active_profile_id(), key, value))
+            return
         self._execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -270,10 +318,16 @@ class Database:
         if len(self.list_profiles()) <= 1:
             raise ValueError("Debe existir al menos un perfil.")
         with self._lock:
-            for tabla in ("jobs", "evaluations", "keywords", "technologies"):
+            for tabla in ("jobs", "evaluations", "keywords", "technologies",
+                          "profile_settings"):
                 self._conn.execute(f"DELETE FROM {tabla} WHERE profile_id = ?", (pid,))
             self._conn.execute("DELETE FROM profiles WHERE id = ?", (pid,))
             self._conn.commit()
+
+    def active_profile_name(self) -> str:
+        rows = self._query(
+            "SELECT name FROM profiles WHERE id = ?", (self.active_profile_id(),))
+        return rows[0]["name"] if rows else "Perfil"
 
     # -- Resumen del perfil (CV) ----------------------------------------------
 
