@@ -63,7 +63,24 @@ bajo demanda, y marcar como aplicada/descartada.
 
 ---
 
-## 🛠️ Requisitos e instalación
+## ⬇️ Descargas (sin instalar nada)
+
+¿No quieres compilar? Descarga el binario ya listo desde
+**[Releases](https://github.com/MaxPanRa/sinfro/releases)**:
+
+- **Windows** → `Sinfro-Windows.zip` → descomprime y ejecuta `Sinfro.exe`.
+- **macOS** → `Sinfro-macOS.zip` → descomprime y ejecuta `Sinfro`.
+
+No necesitas Python ni compilar. (Solo requieres **OpenCode CLI** para la parte de
+IA.) Como la app no está firmada, la primera vez Windows (SmartScreen) o macOS
+(Gatekeeper) pedirán confirmar: *"Más información → Ejecutar de todos modos"* /
+clic derecho → *Abrir*.
+
+> Los binarios se generan automáticamente con GitHub Actions en cada *release*.
+
+---
+
+## 🛠️ Requisitos e instalación (para desarrollar/compilar)
 
 | Requisito | Detalle |
 |-----------|---------|

@@ -11,7 +11,12 @@ feedparser, python-docx) se recolectan con collect_all para que no falten en
 tiempo de ejecución.
 """
 
+import sys
+
 from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+# El ícono .ico solo aplica en Windows; en macOS PyInstaller espera .icns.
+APP_ICON = "job_radar/assets/icon.ico" if sys.platform == "win32" else None
 
 datas, binaries, hiddenimports = [], [], []
 
@@ -59,7 +64,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="Sinfro",
-    icon="job_radar/assets/icon.ico",
+    icon=APP_ICON,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

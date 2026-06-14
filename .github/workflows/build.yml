@@ -1,0 +1,67 @@
+name: Compilar binarios (Windows + macOS)
+
+# Se dispara al publicar un tag vX.Y.Z, o manualmente desde la pestaña Actions.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write  # necesario para adjuntar binarios al Release
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: Sinfro-Windows
+          - os: macos-latest
+            artifact: Sinfro-macOS
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Compilar con PyInstaller
+        run: pyinstaller --noconfirm --clean job_radar.spec
+
+      - name: Empaquetar (zip)
+        shell: bash
+        run: |
+          cd dist
+          if command -v 7z >/dev/null 2>&1; then
+            7z a "../${{ matrix.artifact }}.zip" Sinfro
+          else
+            zip -r "../${{ matrix.artifact }}.zip" Sinfro
+          fi
+
+      - name: Subir artefacto del run (para workflow_dispatch)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+          retention-days: 14
+
+      - name: Adjuntar al Release (solo en tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}.zip
+          generate_release_notes: true
