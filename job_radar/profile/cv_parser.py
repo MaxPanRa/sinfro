@@ -58,15 +58,17 @@ A partir del texto del CV de abajo, responde ÚNICAMENTE con un objeto JSON vál
 (sin markdown, sin texto extra) con esta forma:
 {{
   "resumen": "<resumen profesional del candidato en 3-5 frases, en español>",
-  "keywords": ["<6 palabras clave de búsqueda de empleo acordes al perfil>"],
+  "keywords": ["<10 frases clave de búsqueda de empleo acordes al perfil>"],
   "skills": [
     {{"name": "<skill>", "level": <entero 1-10 según dominio aparente>}}
   ]
 }}
 Las skills pueden ser de CUALQUIER tipo: técnicas, administrativas, legales, \
 soft skills, liderazgo, idiomas, herramientas, etc. — lo que aplique al perfil.
-Las keywords son términos cortos para buscar vacantes (ej. para un abogado: \
-"abogado corporativo", "litigio"; para un dev: "frontend", "react"). Exactamente 6.
+Las keywords son **frases clave de búsqueda** para encontrar vacantes (la búsqueda \
+es semántica, así que pueden ser de 1 a 4 palabras; ej. para un abogado: \
+"abogado corporativo", "litigio mercantil", "derecho laboral"; para un dev: \
+"desarrollador frontend", "react senior"). Devuelve EXACTAMENTE 10, variadas.
 Estima el nivel por años/uso/seniority. Máximo 30 skills.
 
 === CV ===
@@ -75,7 +77,7 @@ Estima el nivel por años/uso/seniority. Máximo 30 skills.
 
 
 def analyze_cv(client: OpenCodeClient, texto_cv: str, timeout: int = 150) -> dict[str, Any]:
-    """Analiza el CV con IA. Devuelve ``{"resumen", "keywords": [...6], "skills": [...]}``.
+    """Analiza el CV con IA. Devuelve ``{"resumen", "keywords": [...10], "skills": [...]}``.
 
     Normaliza/valida la salida. Lanza OpenCodeError/ValueError si falla.
     """
@@ -86,10 +88,10 @@ def analyze_cv(client: OpenCodeClient, texto_cv: str, timeout: int = 150) -> dic
     resumen = str(data.get("resumen", "")).strip()
 
     keywords: list[str] = []
-    for kw in data.get("keywords", [])[:6]:
+    for kw in data.get("keywords", [])[:10]:
         kw = str(kw).strip()
         if kw:
-            keywords.append(kw[:40])
+            keywords.append(kw[:60])
 
     # Acepta "skills" (nuevo) o "tecnologias" (compatibilidad).
     raw_skills = data.get("skills") or data.get("tecnologias") or []
