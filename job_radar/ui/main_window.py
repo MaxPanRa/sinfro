@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
@@ -9,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __app_name__, __version__
-from ..config import ICON_PATH
+from ..config import GROUP_A_INTERVAL_MIN, ICON_PATH
 from ..db.database import Database
 from ..service import AppService
 from ..sources import GROUP_A_SOURCES
@@ -138,43 +140,56 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Monitoreo detenido.")
             self.left.set_estado("Monitoreo detenido.")
 
+    def _on_progress(self, texto: str) -> None:
+        """Muestra el progreso en vivo debajo del botón y en la barra de estado."""
+        self.left.set_estado(texto)
+        self.statusBar().showMessage(texto)
+
+    def _proxima_corrida_str(self) -> str:
+        """Hora aproximada de la próxima corrida del Grupo A."""
+        dev = self.db.get_setting("dev_fast_scheduler", "0") == "1"
+        mins = 1 if dev else GROUP_A_INTERVAL_MIN
+        return (datetime.now() + timedelta(minutes=mins)).strftime("%H:%M:%S")
+
     def run_group_a(self) -> None:
         """Lanza una corrida del Grupo A en un worker (no bloquea la UI)."""
         proxies = self.service.proxies()
-
-        def tarea() -> dict:
-            total_nuevos: list[str] = []
-            fallos: list[str] = []
-            for source_cls in GROUP_A_SOURCES:
-                src = source_cls(proxies=proxies)
-                try:
-                    jobs = src.fetch()
-                    nuevos = self.service.ingest_jobs(jobs)
-                    total_nuevos.extend(nuevos)
-                except Exception as exc:  # noqa: BLE001 — una fuente no tumba al resto
-                    fallos.append(f"{src.name}: {type(exc).__name__}")
-            return {"nuevos": total_nuevos, "fallos": fallos}
-
-        worker = Worker(tarea)
+        worker = Worker(self._fetch_group_a, proxies)
+        worker.kwargs = {"progress": worker.signals.progress.emit}
+        worker.signals.progress.connect(self._on_progress)
         worker.signals.result.connect(self._group_a_listo)
         worker.signals.error.connect(
             lambda m: self.statusBar().showMessage(f"Error en ingesta: {m}")
         )
         self.pool.start(worker)
 
+    def _fetch_group_a(self, proxies, progress=None) -> dict:
+        total_nuevos: list[str] = []
+        fallos: list[str] = []
+        for source_cls in GROUP_A_SOURCES:
+            src = source_cls(proxies=proxies)
+            if progress:
+                progress(f"🔎 Buscando en {src.name}…")
+            try:
+                total_nuevos.extend(self.service.ingest_jobs(src.fetch()))
+            except Exception as exc:  # noqa: BLE001 — una fuente no tumba al resto
+                fallos.append(f"{src.name}: {type(exc).__name__}")
+        return {"nuevos": total_nuevos, "fallos": fallos}
+
     def _group_a_listo(self, data: dict) -> None:
         nuevos = data["nuevos"]
         fallos = data["fallos"]
         self.inbox.refresh()
-        msg = f"Grupo A: {len(nuevos)} vacantes nuevas."
+        resumen = f"{len(nuevos)} vacantes nuevas"
         if fallos:
-            msg += f"  Fuentes con fallo: {', '.join(fallos)}"
-        self.statusBar().showMessage(msg)
-        self.left.set_estado(msg)
-        if not self._monitoring_active:
-            return
-        # Encola la clasificación rápida de las nuevas.
-        self.inbox.refresh()
+            resumen += f" · fallos: {', '.join(fallos)}"
+        if self._monitoring_active:
+            estado = (f"✅ {resumen}. Esperando hasta las "
+                      f"{self._proxima_corrida_str()} para volver a buscar…")
+        else:
+            estado = f"✅ {resumen}. Monitoreo detenido."
+        self.statusBar().showMessage(estado)
+        self.left.set_estado(estado)
 
     def run_group_b(self, day_key: str) -> None:
         """Corrida del Grupo B (JobSpy + SerpAPI). Registra la corrida en ``runs``.
@@ -199,16 +214,21 @@ class MainWindow(QMainWindow):
         adzuna_disponible = bool(adzuna_id) and bool(adzuna_key)
         run_id = self.db.start_run("B", day_key)
 
-        def tarea() -> dict:
+        def tarea(progress=None) -> dict:
+            def avisa(nombre: str) -> None:
+                if progress:
+                    progress(f"🔎 Buscando en {nombre}…")
             nuevos: list[str] = []
             fallos: list[str] = []
             # JobSpy (LinkedIn + Indeed).
+            avisa("LinkedIn/Indeed")
             try:
                 js = JobSpySource(search_term=query, location=location, proxies=proxies)
                 nuevos.extend(self.service.ingest_jobs(js.fetch()))
             except Exception as exc:  # noqa: BLE001
                 fallos.append(f"JobSpy: {type(exc).__name__}")
             # OCC Mundial (parsing HTML).
+            avisa("OCC Mundial")
             try:
                 occ = OCCSource(query=query, location=location, proxies=proxies)
                 nuevos.extend(self.service.ingest_jobs(occ.fetch()))
@@ -216,6 +236,7 @@ class MainWindow(QMainWindow):
                 fallos.append(f"OCC: {type(exc).__name__}")
             # SerpAPI (si hay key y cuota).
             if serp_disponible:
+                avisa("Google for Jobs")
                 try:
                     sp = SerpApiSource(
                         api_key=serpapi_key,
@@ -228,6 +249,7 @@ class MainWindow(QMainWindow):
                     fallos.append(f"SerpAPI: {type(exc).__name__}")
             # Jooble MX (si hay key y cuota).
             if jooble_disponible:
+                avisa("Jooble MX")
                 try:
                     jooble = JoobleSource(
                         api_key=jooble_key,
@@ -241,6 +263,7 @@ class MainWindow(QMainWindow):
                     fallos.append(f"Jooble: {type(exc).__name__}")
             # Adzuna (México + todas las profesiones; requiere app_id/app_key).
             if adzuna_disponible:
+                avisa("Adzuna")
                 try:
                     adz = AdzunaSource(
                         app_id=adzuna_id,
@@ -256,6 +279,8 @@ class MainWindow(QMainWindow):
             return {"nuevos": nuevos, "fallos": fallos, "run_id": run_id}
 
         worker = Worker(tarea)
+        worker.kwargs = {"progress": worker.signals.progress.emit}
+        worker.signals.progress.connect(self._on_progress)
         worker.signals.result.connect(self._group_b_listo)
         worker.signals.error.connect(
             lambda m: self.statusBar().showMessage(f"Error en Grupo B: {m}")
@@ -271,11 +296,14 @@ class MainWindow(QMainWindow):
         self.inbox.refresh()
         restante = self.service.serpapi_remaining()
         msg = (
-            f"Grupo B: {len(nuevos)} vacantes nuevas. "
-            f"SerpAPI restante: {restante}. Jooble restante: {self.service.jooble_remaining()}."
+            f"✅ Grupo B: {len(nuevos)} vacantes nuevas. "
+            f"SerpAPI: {restante} · Jooble: {self.service.jooble_remaining()}."
         )
         if fallos:
-            msg += f"  Fallos: {', '.join(fallos)}"
+            msg += f" Fallos: {', '.join(fallos)}"
+        if self._monitoring_active:
+            msg += (f" Esperando hasta las {self._proxima_corrida_str()} "
+                    "para volver a buscar…")
         self.statusBar().showMessage(msg)
         self.left.set_estado(msg)
         if not self._monitoring_active:
