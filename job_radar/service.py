@@ -18,6 +18,26 @@ from .config import (
 from .db.database import Database
 from .sources.base import Job
 
+#: Palabras vacías que se ignoran al dividir keywords/skills en tokens.
+_STOPWORDS = {
+    "de", "del", "la", "el", "los", "las", "y", "o", "u", "en", "con", "para",
+    "por", "un", "una", "al", "a", "the", "of", "and", "or", "to", "in", "for",
+    "with",
+}
+
+#: Sinónimos para reforzar el match de términos tech comunes (clave normalizada).
+_ALIASES = {
+    "frontend": ["frontend", "front end", "front-end", "ui engineer"],
+    "fullstack": ["fullstack", "full stack", "full-stack"],
+    "typescript": ["typescript", "type script"],
+    "javascript": ["javascript"],
+    "react": ["react", "react.js", "reactjs", "next.js", "nextjs"],
+    "angular": ["angular"],
+    "ux/ui": ["ux/ui", "ux ui", "ui design", "product design"],
+    "spring": ["spring", "spring boot"],
+    "node": ["node", "node.js", "nodejs"],
+}
+
 
 class AppService:
     """Fachada de logica de negocio compartida por la UI y el scheduler."""
@@ -151,34 +171,40 @@ class AppService:
                 "resumen_una_linea": "Descartada por restriccion geografica (US/foreign only).",
             }
 
-        keywords = [self._norm(k) for k in self.db.get_keywords()]
-        techs = [self._norm(t["name"]) for t in self.db.get_technologies()]
-        desired = list(dict.fromkeys([*keywords, *techs]))
-        aliases = {
-            "frontend": ["frontend", "front end", "front-end", "ui engineer"],
-            "fullstack": ["fullstack", "full stack", "full-stack"],
-            "typescript": ["typescript", "type script", " ts "],
-            "javascript": ["javascript", " js "],
-            "react": ["react", "react.js", "reactjs", "next.js", "nextjs"],
-            "angular": ["angular"],
-            "ux/ui": ["ux/ui", "ux ui", "ux", "ui design", "product design"],
-            "spring": ["spring", "spring boot"],
-            "java": ["java"],
-            "node": ["node", "node.js", "nodejs"],
-        }
+        # --- Palabras clave = FUENTE PRINCIPAL (se dividen en tokens + frase) ---
+        kw_points = 0
+        kw_matched: list[str] = []
+        for kw in self.db.get_keywords():
+            fuerza = self._match_strength(kw, blob, _ALIASES.get(self._norm(kw)))
+            if fuerza == 3:
+                kw_points += 14
+                kw_matched.append(kw)
+            elif fuerza == 2:
+                kw_points += 10
+                kw_matched.append(kw)
+            elif fuerza == 1:
+                kw_points += 4
+        kw_points = min(55, kw_points)
+        if kw_matched:
+            reasons.append("keywords: " + ", ".join(kw_matched[:5]))
 
-        matched: list[str] = []
-        for skill in desired:
-            terms = aliases.get(skill, [skill])
-            if any(self._term_in_blob(term, blob) for term in terms):
-                matched.append(skill)
-
-        skill_score = min(45, len(set(matched)) * 9)
-        if matched:
-            reasons.append("skills: " + ", ".join(sorted(set(matched))[:6]))
+        # --- Skills = pesan fuerte en el %, ponderadas por nivel ---
+        skill_points = 0.0
+        skill_matched: list[str] = []
+        for t in self.db.get_technologies():
+            fuerza = self._match_strength(
+                t["name"], blob, _ALIASES.get(self._norm(t["name"])))
+            if fuerza >= 2:
+                skill_points += 2.5 + float(t.get("level", 5)) * 0.6
+                skill_matched.append(t["name"])
+            elif fuerza == 1:
+                skill_points += 1.0
+        skill_points = min(35.0, skill_points)
+        if skill_matched:
+            reasons.append("skills: " + ", ".join(skill_matched[:5]))
 
         location_ok = self.location_match(job)
-        location_score = 25 if location_ok else 0
+        location_score = 12 if location_ok else 0
         if location_ok:
             reasons.append("ubicacion compatible")
 
@@ -187,39 +213,40 @@ class AppService:
             for m in (self.db.get_setting("modalidades", "") or "").split(",")
             if m.strip()
         }
-        remoteish = any(term in blob for term in ["remoto", "remote", "work from home", "wfh"])
-        hybridish = any(term in blob for term in ["hibrido", "hybrid"])
-        onsiteish = any(term in blob for term in ["presencial", "onsite", "on-site"])
-        modality_score = 10
+        remoteish = any(t in blob for t in ["remoto", "remote", "work from home", "wfh"])
+        hybridish = any(t in blob for t in ["hibrido", "hybrid"])
+        onsiteish = any(t in blob for t in ["presencial", "onsite", "on-site"])
         if not modalities:
-            modality_score = 15
+            modality_score = 6
         elif "remoto" in modalities and remoteish:
-            modality_score = 20
+            modality_score = 8
             reasons.append("remoto")
         elif "hibrido" in modalities and hybridish:
-            modality_score = 15
+            modality_score = 6
             reasons.append("hibrido")
         elif "presencial" in modalities and onsiteish:
-            modality_score = 10
-        elif modalities:
+            modality_score = 5
+        else:
             modality_score = 0
             penalties.append("modalidad no ideal")
 
-        seniority_score = 10
-        if any(term in blob for term in ["senior", "sr.", "lead", "staff", "principal"]):
-            seniority_score = 10
-            reasons.append("seniority adecuado")
-        elif any(term in blob for term in ["junior", "intern", "trainee"]):
-            seniority_score = -10
+        seniority_score = 0
+        if any(t in blob for t in ["senior", "sr.", "lead", "staff", "principal"]):
+            seniority_score = 4
+        elif any(t in blob for t in ["junior", "intern", "trainee", "becario"]):
+            seniority_score = -6
             penalties.append("seniority bajo")
 
-        if any(term in blob for term in ["visa", "security clearance", "clearance required"]):
+        if any(t in blob for t in ["visa", "security clearance", "clearance required"]):
             penalties.append("posible requisito legal/visa")
 
-        score = skill_score + location_score + modality_score + seniority_score
-        if penalties:
-            score -= 10
-        score = max(0, min(100, score))
+        relevancia = kw_points + skill_points
+        score = relevancia + location_score + modality_score + seniority_score
+        # Las palabras clave MANDAN: sin un match sólido de keyword → fuera de tema.
+        if not kw_matched:
+            score = min(score, 18)
+            penalties.append("sin coincidencia de palabras clave")
+        score = max(0, min(100, int(round(score))))
         threshold = self.compatibility_threshold()
         compatible = score >= threshold
 
@@ -237,7 +264,7 @@ class AppService:
             "modalidad": "Remoto" if remoteish else ("Hibrido" if hybridish else ""),
             "acepta_cdmx": location_ok,
             "seniority": "Senior/Lead" if seniority_score > 0 else "Revisar",
-            "matched_skills": sorted(set(matched)),
+            "matched_skills": skill_matched,
             "reasons": reasons,
             "penalties": penalties,
             "resumen_una_linea": resumen[:180],
@@ -251,6 +278,32 @@ class AppService:
         if len(term) <= 3:
             return re.search(rf"\b{re.escape(term)}\b", blob) is not None
         return term in blob
+
+    def _tokens(self, texto: str) -> list[str]:
+        """Divide una frase en palabras útiles (sin stopwords ni tokens cortos)."""
+        return [t for t in re.split(r"[\s/,_.\-]+", self._norm(texto))
+                if len(t) > 2 and t not in _STOPWORDS]
+
+    def _match_strength(self, phrase: str, blob: str,
+                        aliases: list[str] | None = None) -> int:
+        """Fuerza del match de una frase contra el blob.
+
+        3 = frase/alias exacto; 2 = todos sus tokens; 1 = algún token; 0 = nada.
+        Así "abogado litigante" matchea "abogado", "litigante" y la frase completa.
+        """
+        p = self._norm(phrase).strip()
+        if not p:
+            return 0
+        for cand in [p, *(aliases or [])]:
+            if self._term_in_blob(self._norm(cand), blob):
+                return 3
+        toks = self._tokens(phrase)
+        if not toks:
+            return 0
+        hits = sum(1 for t in toks if self._term_in_blob(t, blob))
+        if hits >= len(toks):
+            return 2
+        return 1 if hits > 0 else 0
 
     def compatibility_threshold(self) -> int:
         try:
@@ -266,8 +319,9 @@ class AppService:
             prelim = self.semantic_preclassification(job)
             if prelim.get("discard_reason"):
                 continue
-            min_ingest_score = max(40, min(self.compatibility_threshold() - 20, 60))
-            if int(prelim.get("match_score", 0)) < min_ingest_score:
+            # Con el gate de keywords, lo fuera de tema queda en <=18 y no entra;
+            # bajamos el umbral para capturar más empleos realmente on-topic.
+            if int(prelim.get("match_score", 0)) < 28:
                 continue
             if self.db.insert_job(job.to_dict()):
                 self.db.set_quick_classification(

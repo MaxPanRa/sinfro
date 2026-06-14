@@ -142,7 +142,10 @@ def build_eval_prompt(
 ) -> str:
     """Construye el prompt de evaluación profunda con todo el contexto."""
     perfil = (profile_summary or "").strip()
-    perfil = f"{PERFIL_BASE}\n{perfil}" if perfil else PERFIL_BASE
+    if PERFIL_BASE:
+        perfil = f"{PERFIL_BASE}\n{perfil}".strip()
+    if not perfil:
+        perfil = "(Perfil no especificado; básate en las skills declaradas y la vacante.)"
     return _PROMPT.format(
         perfil=perfil,
         ingles=nivel_ingles or "B2",
@@ -168,7 +171,10 @@ def build_fast_eval_prompt(
 ) -> str:
     """Construye un prompt compacto para evaluacion bajo demanda rapida."""
     perfil = (profile_summary or "").strip()
-    perfil = f"{PERFIL_BASE}\n{perfil}" if perfil else PERFIL_BASE
+    if PERFIL_BASE:
+        perfil = f"{PERFIL_BASE}\n{perfil}".strip()
+    if not perfil:
+        perfil = "(Perfil no especificado; básate en las skills declaradas y la vacante.)"
     return _FAST_PROMPT.format(
         perfil=perfil,
         ingles=nivel_ingles or "B2",

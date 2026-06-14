@@ -177,11 +177,10 @@ SKILLS_CATALOG = sorted(set([
 
 # --- Perfil base del usuario (se combina con el resumen del CV) ---------------
 
-PERFIL_BASE = (
-    "Desarrollador Full Stack con especialización en Frontend, más de 10 años "
-    "de experiencia, React, Angular, TypeScript, UX/UI, liderazgo técnico y "
-    "trabajo remoto."
-)
+# Vacío a propósito: el perfil real viene del resumen del CV de cada perfil.
+# (Antes estaba fijo en "Desarrollador Full Stack…", lo que sesgaba la IA y
+# castigaba perfiles no-tech como abogacía.)
+PERFIL_BASE = ""
 
 # --- Settings: claves y valores por defecto ----------------------------------
 # Estas claves se guardan en la tabla `settings` (clave→valor texto).
